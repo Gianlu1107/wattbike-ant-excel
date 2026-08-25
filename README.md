@@ -61,18 +61,22 @@ Annota il `device_id` stampato (es. `12345`).
 ### 2) Registra e salva Excel
 
 ```bash
-# primo PowerMeter trovato, Ctrl+C per fermare e salvare
-python -m wattbike_logger record -o sessione.xlsx
+# default: RX-scan (ascolto continuo, mira a ~4 Hz se la bici li trasmette)
+python -m wattbike_logger record -i 54434 -o sessione.xlsx --csv
 
-# oppure ID esplicito + durata fissa + anche CSV
-python -m wattbike_logger record -i 12345 -d 600 -o sessione.xlsx --csv
+# modalità canale classico (come le prime prove)
+python -m wattbike_logger record -i 54434 --mode paired -o sessione.xlsx
 ```
 
-### 3) Prova senza hardware (demo)
+Alla fine della sessione stampa la **frequenza reale** ricevuta (Hz e dt mediano).
 
-```bash
-python -m wattbike_logger demo -d 30 -o prova.xlsx --csv
-```
+### Frequenza dati (0.2 s?)
+
+- Lo standard ANT+ Bicycle Power è **~4 Hz ≈ ogni 0.25 s** (non 0.2 s).
+- Il logger **non impone** 2.5 s: salva ogni pacchetto che arriva dalla chiavetta.
+- Nelle prime prove (~30 W, ~40 rpm) arrivavano aggiornamenti ogni **~2.2–2.5 s**: tipico se la Wattbike aggiorna in modo event-synchronous (per pedalata) e/o se il canale paired perde pacchetti.
+- Per avvicinarsi a 0.25 s: usa `--mode scan`, pedala a cadenza più alta (es. 80–90 rpm), chiudi Zwift/altri app ANT, tieni la stick vicina.
+- **0.20 s esatti (5 Hz)** non sono previsti dal profilo ANT+ power; al massimo ~0.25 s, oppure interpolazione offline (non più “raw”).
 
 ## Colonne Excel (foglio `raw`)
 
@@ -83,8 +87,9 @@ python -m wattbike_logger demo -d 30 -o prova.xlsx --csv
 | `device_id` | ID ANT+ |
 | `page` | numero pagina ANT+ (es. `16` = 0x10 power) |
 | `page_name` | `standard_power` / `standard_torque` / altro |
+| `event_count` | contatore aggiornamento ANT+ (byte 1) |
 | `instantaneous_power_w` | watt istantanei |
-| `average_power_w` | watt medi (dal protocollo) |
+| `average_power_w` | watt medi (dal protocollo / istantanea in scan) |
 | `cadence_rpm` | cadenza |
 | `left_power_w` / `right_power_w` | bilanciamento se disponibile |
 | `torque_nm` | coppia (pagina torque) |

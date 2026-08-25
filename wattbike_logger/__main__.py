@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -10,7 +11,7 @@ from pathlib import Path
 from . import __version__
 from .demo import generate_demo_rows
 from .excel_export import write_csv, write_xlsx
-from .recorder import SessionRecorder, scan_power_meters
+from .recorder import SessionRecorder, scan_power_meters, timing_stats
 
 
 def _default_output(prefix: str = "wattbike") -> Path:
@@ -35,7 +36,11 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
 def cmd_record(args: argparse.Namespace) -> int:
     out = Path(args.output) if args.output else _default_output("wattbike")
-    recorder = SessionRecorder(device_id=args.device_id)
+    recorder = SessionRecorder(
+        device_id=args.device_id,
+        mode=args.mode,
+        quiet=args.quiet,
+    )
     try:
         rows = recorder.run(duration_s=args.duration)
     except Exception as exc:
@@ -50,12 +55,16 @@ def cmd_record(args: argparse.Namespace) -> int:
         print("Nessun pacchetto ricevuto: file non creato.")
         return 1
 
+    stats = timing_stats(rows)
     meta = {
-        "mode": "live",
+        "mode": f"live/{args.mode}",
         "requested_device_id": args.device_id,
         "found_device_id": recorder.found_device_id,
         "duration_s_requested": args.duration,
         "source": "Wattbike ANT+ Bicycle Power (openant)",
+        "timing_stats_json": json.dumps(stats, ensure_ascii=False),
+        "power_hz": (stats.get("standard_power") or {}).get("hz"),
+        "power_median_dt_s": (stats.get("standard_power") or {}).get("median_dt_s"),
     }
     write_xlsx(out, rows, meta=meta)
     print(f"Salvate {len(rows)} righe → {out.resolve()}")
@@ -103,7 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
         "-i",
         type=int,
         default=0,
-        help="ID dispositivo ANT+ (0 = primo PowerMeter trovato)",
+        help="ID dispositivo ANT+ (0 = ascolta qualsiasi PowerMeter)",
     )
     p_rec.add_argument("--output", "-o", type=str, default=None, help="File .xlsx di output")
     p_rec.add_argument(
@@ -113,6 +122,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Secondi di registrazione (default: finché non premi Ctrl+C)",
     )
+    p_rec.add_argument(
+        "--mode",
+        choices=("scan", "paired"),
+        default="scan",
+        help="scan=RX continuo (default, più pacchetti); paired=canale PowerMeter classico",
+    )
+    p_rec.add_argument("--quiet", action="store_true", help="Meno output a schermo")
     p_rec.add_argument("--csv", action="store_true", help="Scrive anche un .csv accanto all'xlsx")
     p_rec.set_defaults(func=cmd_record)
 

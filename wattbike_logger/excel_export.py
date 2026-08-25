@@ -15,6 +15,7 @@ COLUMNS: Sequence[str] = (
     "device_id",
     "page",
     "page_name",
+    "event_count",
     "instantaneous_power_w",
     "average_power_w",
     "cadence_rpm",
