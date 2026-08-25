@@ -78,6 +78,12 @@ Alla fine della sessione stampa la **frequenza reale** ricevuta (Hz e dt mediano
 - Per avvicinarsi a 0.25 s: usa `--mode scan`, pedala a cadenza più alta (es. 80–90 rpm), chiudi Zwift/altri app ANT, tieni la stick vicina.
 - **0.20 s esatti (5 Hz)** non sono previsti dal profilo ANT+ power; al massimo ~0.25 s, oppure interpolazione offline (non più “raw”).
 
+### 3) Prova senza hardware (demo)
+
+```bash
+python -m wattbike_logger demo -d 30 -o prova.xlsx --csv
+```
+
 ## Colonne Excel (foglio `raw`)
 
 | Colonna | Significato |
