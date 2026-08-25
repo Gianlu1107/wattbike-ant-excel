@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.xlsx
+*.csv
+!sample_output/demo.xlsx
+!sample_output/demo.csv
+.DS_Store
+dist/
+build/
+*.egg-info/

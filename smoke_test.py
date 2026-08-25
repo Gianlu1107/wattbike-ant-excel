@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+"""Smoke test senza hardware ANT+."""
+
+from pathlib import Path
+import tempfile
+
+from wattbike_logger.demo import generate_demo_rows
+from wattbike_logger.excel_export import COLUMNS, write_csv, write_xlsx
+
+
+def main() -> None:
+    rows = generate_demo_rows(seconds=2, hz=4)
+    assert len(rows) == 8
+    assert all(c in rows[0] for c in COLUMNS)
+    assert rows[0]["page"] == 0x10
+    assert "10 " in rows[0]["raw_bytes_hex"]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        xlsx = Path(tmp) / "t.xlsx"
+        csv = Path(tmp) / "t.csv"
+        write_xlsx(xlsx, rows, meta={"mode": "test"})
+        write_csv(csv, rows)
+        assert xlsx.stat().st_size > 0
+        assert csv.read_text(encoding="utf-8").splitlines()[0].startswith("timestamp_iso")
+
+    print("OK: demo + export Excel/CSV")
+
+
+if __name__ == "__main__":
+    main()
