@@ -19,15 +19,15 @@ jobs:
         include:
           - os: windows-latest
             exe_name: WattbikeLogger-windows-x64
-            artifact: WattbikeLogger-windows-x64.exe
+            artifact: WattbikeLogger-windows-x64.zip
             libusb: windows
           - os: macos-14
             exe_name: WattbikeLogger-macos-arm64
-            artifact: WattbikeLogger-macos-arm64
+            artifact: WattbikeLogger-macos-arm64.zip
             libusb: macos
           - os: ubuntu-22.04
             exe_name: WattbikeLogger-linux-x64
-            artifact: WattbikeLogger-linux-x64
+            artifact: WattbikeLogger-linux-x64.zip
             libusb: linux
 
     runs-on: ${{ matrix.os }}
@@ -45,22 +45,16 @@ jobs:
         if: matrix.libusb == 'macos'
         run: brew install libusb
 
-      - name: Install libusb (Linux)
+      - name: Install libusb + zip tools (Linux)
         if: matrix.libusb == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libusb-1.0-0 libusb-1.0-0-dev libudev-dev upx-ucl
+          sudo apt-get install -y libusb-1.0-0 libusb-1.0-0-dev libudev-dev upx-ucl zip
 
       - name: Install UPX (Windows)
         if: matrix.libusb == 'windows'
         shell: pwsh
-        run: |
-          choco install upx -y --no-progress
-          upx --version
-
-      - name: Install UPX (macOS)
-        if: matrix.libusb == 'macos'
-        run: brew install upx || true
+        run: choco install upx -y --no-progress
 
       - name: Install dependencies
         run: |
@@ -73,35 +67,63 @@ jobs:
           WATTBIKE_EXE_NAME: ${{ matrix.exe_name }}
         run: pyinstaller --noconfirm WattbikeLogger.spec
 
-      - name: Normalize artifact path (Windows)
+      - name: Package Windows zip
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path out | Out-Null
-          if (Test-Path "dist/${{ matrix.exe_name }}.exe") {
-            Copy-Item "dist/${{ matrix.exe_name }}.exe" "out/${{ matrix.artifact }}"
+          New-Item -ItemType Directory -Force -Path out/pkg | Out-Null
+          $exe = if (Test-Path "dist/WattbikeLogger-windows-x64.exe") {
+            "dist/WattbikeLogger-windows-x64.exe"
           } elseif (Test-Path "dist/WattbikeLogger.exe") {
-            Copy-Item "dist/WattbikeLogger.exe" "out/${{ matrix.artifact }}"
-          } else {
-            Get-ChildItem -Recurse dist | Write-Output
-            throw "Executable not found"
-          }
-          Get-Item "out/${{ matrix.artifact }}" | Select-Object Name, Length
+            "dist/WattbikeLogger.exe"
+          } else { throw "exe missing"; }
+          Copy-Item $exe out/pkg/WattbikeLogger-windows-x64.exe
+          Copy-Item "scripts/windows/Install-WattbikeLogger.ps1" out/pkg/
+          Compress-Archive -Path out/pkg/* -DestinationPath "out/${{ matrix.artifact }}" -Force
+          Get-Item "out/${{ matrix.artifact }}" | Format-List Name, Length
 
-      - name: Normalize artifact path (Unix)
-        if: runner.os != 'Windows'
+      - name: Package macOS zip (.app + installer)
+        if: runner.os == 'macOS'
         run: |
-          mkdir -p out
-          if [ -f "dist/${{ matrix.exe_name }}" ]; then
-            cp "dist/${{ matrix.exe_name }}" "out/${{ matrix.artifact }}"
-          elif [ -f "dist/WattbikeLogger" ]; then
-            cp "dist/WattbikeLogger" "out/${{ matrix.artifact }}"
+          mkdir -p out/pkg
+          if [ -d dist/WattbikeLogger.app ]; then
+            # Pulisce xattr prima della firma ad-hoc (evita "resource fork ... not allowed")
+            xattr -cr dist/WattbikeLogger.app || true
+            codesign --force --deep -s - dist/WattbikeLogger.app || true
+            cp -R dist/WattbikeLogger.app out/pkg/
           else
-            find dist -type f
-            echo "Executable not found" >&2
+            find dist -type d -name '*.app'
+            echo "WattbikeLogger.app missing" >&2
             exit 1
           fi
-          chmod +x "out/${{ matrix.artifact }}"
+          cp "scripts/macos/Install Wattbike Logger.command" out/pkg/
+          chmod +x "out/pkg/Install Wattbike Logger.command"
+          xattr -cr out/pkg/WattbikeLogger.app || true
+          (
+            cd out/pkg
+            zip -r -y "../../out/${{ matrix.artifact }}" WattbikeLogger.app "Install Wattbike Logger.command"
+          )
+          ls -lh "out/${{ matrix.artifact }}"
+
+      - name: Package Linux zip
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p out/pkg
+          if [ -f dist/WattbikeLogger-linux-x64 ]; then
+            cp dist/WattbikeLogger-linux-x64 out/pkg/
+          elif [ -f dist/WattbikeLogger ]; then
+            cp dist/WattbikeLogger out/pkg/WattbikeLogger-linux-x64
+          else
+            find dist -type f
+            exit 1
+          fi
+          chmod +x out/pkg/WattbikeLogger-linux-x64
+          cp scripts/linux/install.sh out/pkg/
+          chmod +x out/pkg/install.sh
+          (
+            cd out/pkg
+            zip -r "../../out/${{ matrix.artifact }}" WattbikeLogger-linux-x64 install.sh
+          )
           ls -lh "out/${{ matrix.artifact }}"
 
       - name: Upload artifact
@@ -123,7 +145,7 @@ jobs:
       - name: Flatten assets
         run: |
           mkdir -p dist
-          find release-assets -type f -exec cp {} dist/ \;
+          find release-assets -type f -name '*.zip' -exec cp {} dist/ \;
           ls -lah dist
 
       - name: Publish GitHub Release

@@ -6,40 +6,34 @@ Profilo usato: **ANT+ Bicycle Power** (device type 11) — potenza, cadenza, byt
 
 ## Download (consigliato)
 
-Dalla [pagina Releases](https://github.com/Gianlu1107/wattbike-ant-excel/releases):
+Dalla [pagina Releases](https://github.com/Gianlu1107/wattbike-ant-excel/releases) scarica lo **zip** della tua piattaforma:
 
 | File | Piattaforma |
 |------|-------------|
-| `WattbikeLogger-windows-x64.exe` | Windows |
-| `WattbikeLogger-macos-arm64` | macOS Apple Silicon (M1/M2/M3/…) |
-| `WattbikeLogger-linux-x64` | Linux x64 |
+| `WattbikeLogger-windows-x64.zip` | Windows |
+| `WattbikeLogger-macos-arm64.zip` | macOS Apple Silicon (M1/M2/M3/…) |
+| `WattbikeLogger-linux-x64.zip` | Linux x64 |
 
 > macOS Intel: i runner GitHub `macos-13` non sono più disponibili; su Intel usa `pip install` + `python -m wattbike_logger`, oppure una macchina Apple Silicon.
 
-### Prima esecuzione
+### Installazione
 
-**macOS** — dopo il download, Gatekeeper blocca l’app (“sviluppatore non verificato” / *rejected*). Nel Terminale:
+**macOS** — decomprimi lo zip, poi **doppio click** su `Install Wattbike Logger.command` → Installa. L’app va in **Applicazioni** e si apre **senza Terminale**. (Se Gatekeeper chiede conferma: clic destro → Apri.)
 
-```bash
-chmod +x ~/Downloads/WattbikeLogger-macos-arm64
-xattr -d com.apple.quarantine ~/Downloads/WattbikeLogger-macos-arm64
-open ~/Downloads/WattbikeLogger-macos-arm64
-```
+**Windows** — decomprimi lo zip, tasto destro su `Install-WattbikeLogger.ps1` → **Esegui con PowerShell**. Copia in `%LOCALAPPDATA%\WattbikeLogger`, scorciatoia nel menu Start, avvio senza console. (SmartScreen: Altre info → Esegui comunque.)
 
-(Se il file è in un’altra cartella, cambia il percorso. In alternativa: clic destro → Apri → Apri.)
-
-**Linux**:
+**Linux** — decomprimi e:
 
 ```bash
-chmod +x ~/Downloads/WattbikeLogger-linux-x64
-~/Downloads/WattbikeLogger-linux-x64
+chmod +x install.sh WattbikeLogger-linux-x64
+./install.sh
 ```
 
-**Windows**: esegui `WattbikeLogger-windows-x64.exe` (SmartScreen può chiedere “Altre info” → Esegui comunque).
+Installa in `~/.local/bin` e crea una voce nel menu applicazioni (`Terminal=false`).
 
 All’avvio l’app verifica i driver ANT+ e cerca aggiornamenti.
 
-Per pubblicare una release: `git tag v1.3.1 && git push origin v1.3.1` (GitHub Actions builda tutto).
+Per pubblicare una release: `git tag v1.3.2 && git push origin v1.3.2` (GitHub Actions builda gli zip).
 
 ## Requisiti (da sorgente)
 
@@ -118,6 +112,15 @@ Foglio `meta`: info sessione e statistiche frequenza.
 pip install -r requirements.txt -r requirements-build.txt
 python smoke_test.py
 pyinstaller --noconfirm WattbikeLogger.spec
+# macOS → dist/WattbikeLogger.app  |  Windows/Linux → dist/WattbikeLogger*
+```
+
+Pacchetto locale macOS (come in CI):
+
+```bash
+mkdir -p out/pkg && cp -R dist/WattbikeLogger.app out/pkg/
+cp "scripts/macos/Install Wattbike Logger.command" out/pkg/
+(cd out/pkg && zip -r ../WattbikeLogger-macos-arm64.zip WattbikeLogger.app "Install Wattbike Logger.command")
 ```
 
 Vedi [CHANGELOG.md](CHANGELOG.md).

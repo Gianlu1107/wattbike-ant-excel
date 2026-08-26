@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.2
+
+- Fix crash driver status (`accessible`)
+- Installer per OS: macOS `.app` + `Install Wattbike Logger.command` (niente Terminale / Gatekeeper)
+- Windows zip con script PowerShell; Linux zip con `install.sh`
+- GUI windowed senza console
+- Grafici con assi, griglia e scale utili (W / rpm / tempo)
+- Start disabilitato se nessuna chiavetta ANT+ è collegata
+
 ## 1.3.1
 
 - Grafici in tkinter puro (niente matplotlib/numpy) → eseguibili più leggeri

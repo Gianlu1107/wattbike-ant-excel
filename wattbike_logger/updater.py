@@ -67,7 +67,7 @@ def _http_json(url: str, timeout: float = 12.0) -> dict:
 
 
 def _pick_asset(assets: list[dict]) -> dict | None:
-    """Sceglie l'asset eseguibile per la piattaforma/architettura corrente."""
+    """Sceglie l'asset eseguibile/zip per la piattaforma/architettura corrente."""
     names = [(a.get("name") or "", a) for a in assets]
     mach = platform.machine().lower()
 
@@ -75,21 +75,21 @@ def _pick_asset(assets: list[dict]) -> dict | None:
         keys = ["windows-x64", "windows", "win"]
         if mach in ("arm64", "aarch64"):
             keys = ["windows-arm64", "windows-arm", "windows"]
-        exts = (".exe",)
+        exts = (".zip", ".exe")
     elif sys.platform == "darwin":
         if mach in ("arm64", "aarch64"):
             keys = ["macos-arm64", "darwin-arm64", "macos-arm", "arm64"]
         else:
             keys = ["macos-x64", "macos-amd64", "macos-x86_64", "darwin-x64", "x86_64", "x64"]
         keys += ["macos", "darwin", "mac"]
-        exts = ("", ".zip", ".dmg")  # onefile senza estensione
+        exts = (".zip", ".dmg", "")
     else:
         if mach in ("aarch64", "arm64"):
             keys = ["linux-arm64", "linux-aarch64", "arm64"]
         else:
             keys = ["linux-x64", "linux-amd64", "linux-x86_64", "x86_64", "x64"]
         keys += ["linux"]
-        exts = ("", ".AppImage", ".tar.gz", ".zip")
+        exts = (".zip", ".AppImage", ".tar.gz", "")
 
     def score(name: str) -> int:
         lower = name.lower()
@@ -98,12 +98,11 @@ def _pick_asset(assets: list[dict]) -> dict | None:
             if key in lower:
                 s += 100 - i
         if any(lower.endswith(ext) for ext in exts if ext):
-            s += 5
-        if lower.endswith(".exe") and sys.platform.startswith("win"):
-            s += 20
+            s += 10
+        if lower.endswith(".zip"):
+            s += 15  # preferisci pacchetto installer
         if "wattbike" in lower:
             s += 3
-        # penalizza asset chiaramente di altre piattaforme
         if sys.platform != "darwin" and "macos" in lower:
             s -= 50
         if not sys.platform.startswith("win") and lower.endswith(".exe"):
@@ -177,13 +176,34 @@ def frozen_executable() -> Path | None:
     return None
 
 
+def _unpack_if_zip(path: Path, tmp_dir: Path) -> Path:
+    """Se path è uno zip, lo estrae e restituisce la cartella; altrimenti path."""
+    if path.suffix.lower() != ".zip":
+        return path
+    import zipfile
+
+    extract_to = tmp_dir / "extracted"
+    extract_to.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "r") as zf:
+        zf.extractall(extract_to)
+    return extract_to
+
+
+def _find_in_tree(root: Path, patterns: tuple[str, ...]) -> Path | None:
+    for pat in patterns:
+        hits = sorted(root.rglob(pat))
+        if hits:
+            return hits[0]
+    return None
+
+
 def apply_update(
     release: ReleaseInfo,
     on_progress: Callable[[int, int], None] | None = None,
     on_status: Callable[[str], None] | None = None,
 ) -> None:
     """
-    Scarica il nuovo eseguibile e lo installa sostituendo quello corrente.
+    Scarica il nuovo pacchetto (zip o binario) e sostituisce l'installazione corrente.
     Su Windows usa uno script .bat che aspetta la chiusura del processo.
     """
     exe = frozen_executable()
@@ -198,13 +218,79 @@ def apply_update(
     tmp_dir = Path(tempfile.mkdtemp(prefix="wattbike_update_"))
     download_path = tmp_dir / release.asset_name
     download_file(release.asset_url, download_path, on_progress=on_progress)
+    payload = _unpack_if_zip(download_path, tmp_dir)
 
     if sys.platform.startswith("win"):
-        _install_windows(exe, download_path, status)
+        new_exe = payload if payload.is_file() else _find_in_tree(payload, ("WattbikeLogger*.exe", "*.exe"))
+        if new_exe is None or not new_exe.is_file():
+            raise RuntimeError("Nessun .exe trovato nel pacchetto di aggiornamento.")
+        _install_windows(exe, new_exe, status)
     elif sys.platform == "darwin":
-        _install_posix(exe, download_path, status)
+        _install_macos(exe, payload, status)
     else:
-        _install_posix(exe, download_path, status)
+        new_bin = payload if payload.is_file() else _find_in_tree(payload, ("WattbikeLogger*",))
+        if new_bin is None or not new_bin.is_file():
+            raise RuntimeError("Nessun binario trovato nel pacchetto di aggiornamento.")
+        _install_posix(exe, new_bin, status)
+
+
+def _macos_app_bundle(exe: Path) -> Path | None:
+    """Se exe è dentro Foo.app/Contents/MacOS/..., restituisce Foo.app."""
+    parts = exe.resolve().parts
+    for i, part in enumerate(parts):
+        if part.endswith(".app"):
+            return Path(*parts[: i + 1])
+    return None
+
+
+def _install_macos(current_exe: Path, payload: Path, status: Callable[[str], None]) -> None:
+    status("Installazione aggiornamento macOS...")
+    app = None
+    if payload.is_dir() and payload.name.endswith(".app"):
+        app = payload
+    elif payload.is_dir():
+        app = _find_in_tree(payload, ("WattbikeLogger.app", "*.app"))
+        if app is not None and not str(app).endswith(".app"):
+            app = None
+        # rglob('*.app') returns the .app directory itself
+        if app is None:
+            for p in payload.rglob("*"):
+                if p.is_dir() and p.name.endswith(".app"):
+                    app = p
+                    break
+
+    current_app = _macos_app_bundle(current_exe)
+    if app is not None and current_app is not None:
+        dest = current_app
+        # Preferisci /Applications se l'app corrente è lì o esiste già
+        apps_dest = Path("/Applications") / app.name
+        if str(current_app).startswith("/Applications") or apps_dest.exists():
+            dest = apps_dest
+        sh = Path(tempfile.mkdtemp(prefix="wattbike_upd_")) / "update.sh"
+        sh.write_text(
+            f"""#!/bin/bash
+PID={os.getpid()}
+while kill -0 "$PID" 2>/dev/null; do sleep 1; done
+xattr -cr "{app}" 2>/dev/null || true
+rm -rf "{dest}"
+cp -R "{app}" "{dest}"
+xattr -cr "{dest}" 2>/dev/null || true
+open "{dest}"
+rm -rf "{payload.parent}" 2>/dev/null || true
+rm -f "$0"
+""",
+            encoding="utf-8",
+        )
+        os.chmod(sh, 0o755)
+        subprocess.Popen(["/bin/bash", str(sh)], start_new_session=True)
+        status("Riavvio in corso...")
+        sys.exit(0)
+
+    # Fallback: binario onefile
+    new_bin = payload if payload.is_file() else _find_in_tree(payload, ("WattbikeLogger*",))
+    if new_bin is None or not new_bin.is_file():
+        raise RuntimeError("WattbikeLogger.app non trovato nel pacchetto.")
+    _install_posix(current_exe, new_bin, status)
 
 
 def _install_windows(current_exe: Path, new_file: Path, status: Callable[[str], None]) -> None:
@@ -228,9 +314,11 @@ del "%NEW%" >NUL 2>&1
 del "%~f0" >NUL 2>&1
 """
     bat.write_text(script, encoding="utf-8")
+    # CREATE_NO_WINDOW = 0x08000000 — niente console flash
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
     subprocess.Popen(
         ["cmd.exe", "/c", str(bat)],
-        creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010),
+        creationflags=flags,
         close_fds=True,
     )
     status("Riavvio in corso...")

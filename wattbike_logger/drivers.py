@@ -35,6 +35,11 @@ class DriverStatus:
     detail: str
     can_auto_install: bool
 
+    @property
+    def accessible(self) -> bool:
+        """Alias compatibile con la GUI."""
+        return self.stick_accessible
+
 
 def _status(cb: StatusFn | None, msg: str) -> None:
     if cb:
