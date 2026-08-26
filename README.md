@@ -11,9 +11,10 @@ Dalla [pagina Releases](https://github.com/Gianlu1107/wattbike-ant-excel/release
 | File | Piattaforma |
 |------|-------------|
 | `WattbikeLogger-windows-x64.exe` | Windows |
-| `WattbikeLogger-macos-arm64` | macOS Apple Silicon |
-| `WattbikeLogger-macos-x64` | macOS Intel |
+| `WattbikeLogger-macos-arm64` | macOS Apple Silicon (M1/M2/M3/…) |
 | `WattbikeLogger-linux-x64` | Linux x64 |
+
+> macOS Intel: i runner GitHub `macos-13` non sono più disponibili; su Intel usa `pip install` + `python -m wattbike_logger`, oppure una macchina Apple Silicon.
 
 Su macOS/Linux: `chmod +x WattbikeLogger-*` poi avvia. All’avvio l’app verifica i driver ANT+ e cerca aggiornamenti.
 

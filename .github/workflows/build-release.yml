@@ -25,10 +25,6 @@ jobs:
             exe_name: WattbikeLogger-macos-arm64
             artifact: WattbikeLogger-macos-arm64
             libusb: macos
-          - os: macos-13
-            exe_name: WattbikeLogger-macos-x64
-            artifact: WattbikeLogger-macos-x64
-            libusb: macos
           - os: ubuntu-22.04
             exe_name: WattbikeLogger-linux-x64
             artifact: WattbikeLogger-linux-x64
