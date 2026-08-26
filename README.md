@@ -48,7 +48,7 @@ sudo apt install ./WattbikeLogger-linux-x64.deb
 
 All’avvio l’app verifica i driver ANT+ e cerca aggiornamenti.
 
-Per pubblicare una release: `git tag v1.3.4 && git push origin v1.3.4` (GitHub Actions crea pkg / Setup.exe / deb + zip app).
+Per pubblicare una release: `git tag v1.3.5 && git push origin v1.3.5` (GitHub Actions crea pkg / Setup.exe / deb + zip app).
 
 ## Requisiti (da sorgente)
 
@@ -139,7 +139,7 @@ Installer locali:
 ./scripts/linux/build_deb.sh
 
 # Windows (con Inno Setup 6 installato) → out/WattbikeLogger-windows-x64-Setup.exe
-iscc /DMyAppVersion=1.3.3 /DSourceExe=dist\WattbikeLogger-windows-x64.exe /DOutputDir=%cd%\out scripts\windows\WattbikeLogger.iss
+iscc /DMyAppVersion=1.3.5 /DSourceExe=dist\WattbikeLogger-windows-x64.exe /DOutputDir=%cd%\out scripts\windows\WattbikeLogger.iss
 ```
 
 Vedi [CHANGELOG.md](CHANGELOG.md).

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.5
+
+- macOS `.pkg` installa sempre in `/Applications` (`BundleIsRelocatable=false`; non finisce più nel folder del progetto se c’è già un `.app`)
+- Documentazione Gatekeeper / firma opzionale aggiornata
+
 ## 1.3.4
 
 - Fix auto-update su macOS: non sostituire più l’app con un `.pkg` (`Exec format error`)
