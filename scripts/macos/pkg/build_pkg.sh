@@ -52,6 +52,7 @@ COMPONENT="$WORKDIR/WattbikeLogger-component.pkg"
 pkgbuild \
   --root "$WORKDIR/root" \
   --scripts "$WORKDIR/scripts" \
+  --component-plist "$PKG_DIR/component.plist" \
   --identifier "com.gianlu.wattbikelogger" \
   --version "$VERSION" \
   --install-location "/" \
