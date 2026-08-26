@@ -20,21 +20,43 @@ logger = logging.getLogger(__name__)
 
 ReceiveMode = Literal["paired", "scan"]
 
-# ANT+ Bicycle Power channel period (~4.004 Hz → ~0.25 s)
+# ANT+ Bicycle Power channel period (~4.004 Hz → ~0.25 s). Alcuni sensori usano 4091 (~8 Hz).
 DEFAULT_POWER_PERIOD = 8182
+FAST_POWER_PERIOD = 4091
+
+# Profili trainer su 2457 MHz: solo quelli con potenza/cadenza utile
+INTERESTING_DEVICE_TYPES = {
+    DeviceType.PowerMeter.value,
+    DeviceType.FitnessEquipment.value,
+}
+
+# Pagine con watt/cadenza (esclude 0x50/0x51 manufacturer e S&C grezzo)
+DATA_PAGES = {0x10, 0x19}
 
 
 def _bytes_to_hex(data: bytes | list[int] | bytearray) -> str:
     return " ".join(f"{b:02X}" for b in bytes(data[:8]))
 
 
-def _decode_power_page(data: bytes | list[int] | bytearray) -> dict[str, Any]:
-    """Decodifica pagina 0x10 / 0x12 + campi comuni dai 8 byte payload."""
+def _device_type_name(device_type: int | None) -> str | None:
+    if device_type is None:
+        return None
+    try:
+        return DeviceType(device_type).name
+    except ValueError:
+        return f"type_{device_type}"
+
+
+def _decode_payload(
+    data: bytes | list[int] | bytearray,
+    device_type: int | None = None,
+) -> dict[str, Any]:
+    """Decodifica pagine power (0x10/0x12) e FE-C trainer power (0x19)."""
     b = bytes(data[:8])
     page = b[0]
     out: dict[str, Any] = {
         "page": page,
-        "event_count": b[1] if page in (0x10, 0x12) else None,
+        "event_count": None,
         "instantaneous_power_w": None,
         "average_power_w": None,
         "cadence_rpm": None,
@@ -49,6 +71,7 @@ def _decode_power_page(data: bytes | list[int] | bytearray) -> dict[str, Any]:
         cadence = b[3]
         power = b[6] + (b[7] << 8)
         pedal = b[2]
+        out["event_count"] = b[1]
         out["cadence_rpm"] = None if cadence == 255 else cadence
         out["instantaneous_power_w"] = power
         out["average_power_w"] = power  # istantanea; media accumulata richiede storico
@@ -60,13 +83,57 @@ def _decode_power_page(data: bytes | list[int] | bytearray) -> dict[str, Any]:
             out["left_power_w"] = power - right
         page_name = "standard_power"
     elif page == 0x12:
+        out["event_count"] = b[1]
         cadence = b[3]
         out["cadence_rpm"] = None if cadence == 255 else cadence
         page_name = "standard_torque"
+    elif page == 0x19:
+        # FE-C specific trainer data (bike power)
+        out["event_count"] = b[1]
+        cadence = b[2]
+        out["cadence_rpm"] = None if cadence == 255 else cadence
+        out["average_power_w"] = b[3] + (b[4] << 8)
+        out["instantaneous_power_w"] = b[5] + ((b[6] & 0x0F) << 8)
+        page_name = "fe_trainer_power"
     else:
-        page_name = f"page_0x{page:02X}"
+        if device_type == DeviceType.FitnessEquipment.value:
+            page_name = f"fe_page_0x{page:02X}"
+        else:
+            page_name = f"page_0x{page:02X}"
 
     out["page_name"] = page_name
+    return out
+
+
+# Compat alias
+_decode_power_page = _decode_payload
+
+
+def row_has_metrics(row: dict[str, Any]) -> bool:
+    """True se la riga ha potenza (e di solito cadenza) usabile in analisi."""
+    return row.get("instantaneous_power_w") is not None and row.get("page") in DATA_PAGES
+
+
+def filter_metric_rows(
+    rows: list[dict[str, Any]],
+    *,
+    dedupe_events: bool = True,
+) -> list[dict[str, Any]]:
+    """
+    Tiene solo pagine power/FE con watt.
+    Se dedupe_events: scarta ritrasmissioni ANT dello stesso event_count.
+    """
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[Any, Any, Any]] = set()
+    for row in rows:
+        if not row_has_metrics(row):
+            continue
+        if dedupe_events:
+            key = (row.get("device_id"), row.get("page"), row.get("event_count"))
+            if key in seen:
+                continue
+            seen.add(key)
+        out.append(row)
     return out
 
 
@@ -76,13 +143,16 @@ def make_row(
     raw: bytes | list[int] | bytearray,
     started_at: float,
     decoded: dict[str, Any] | None = None,
+    device_type: int | None = None,
 ) -> dict[str, Any]:
     now = time.time()
-    decoded = decoded or _decode_power_page(raw)
+    decoded = decoded or _decode_payload(raw, device_type=device_type)
     return {
         "timestamp_iso": datetime.fromtimestamp(now).isoformat(timespec="milliseconds"),
         "elapsed_s": round(now - started_at, 3),
         "device_id": device_id,
+        "device_type": device_type,
+        "device_type_name": _device_type_name(device_type),
         "page": decoded["page"],
         "page_name": decoded["page_name"],
         "event_count": decoded.get("event_count"),
@@ -116,17 +186,23 @@ def timing_stats(rows: list[dict[str, Any]]) -> dict[str, Any]:
         }
 
     power = [r for r in rows if r.get("page") == 0x10]
+    fe_power = [r for r in rows if r.get("page") == 0x19]
+    unique = filter_metric_rows(rows, dedupe_events=True)
     return {
         "all": _stats(rows, "all_pages"),
         "standard_power": _stats(power, "standard_power"),
+        "fe_trainer_power": _stats(fe_power, "fe_trainer_power"),
+        "unique_power_events": _stats(unique, "unique_power_events"),
     }
 
 
 def print_timing_stats(rows: list[dict[str, Any]]) -> None:
     stats = timing_stats(rows)
     print("\n--- Frequenza ricevuta ---")
-    for key in ("all", "standard_power"):
+    for key in ("all", "standard_power", "fe_trainer_power", "unique_power_events"):
         s = stats[key]
+        if s["n"] == 0:
+            continue
         if s["n"] < 2 or s["hz"] is None:
             print(f"{s['label']}: troppo pochi pacchetti ({s['n']})")
             continue
@@ -136,7 +212,7 @@ def print_timing_stats(rows: list[dict[str, Any]]) -> None:
         )
     print(
         "Nota: ANT+ Bicycle Power standard ≈ 4 Hz (ogni ~0.25 s). "
-        "0.20 s richiederebbe ~5 Hz (oltre il tipico ANT+)."
+        "unique_power_events scarta le ritrasmissioni dello stesso event_count."
     )
 
 
@@ -149,17 +225,29 @@ class SessionRecorder:
         on_row: Callable[[dict[str, Any]], None] | None = None,
         mode: ReceiveMode = "scan",
         quiet: bool = False,
+        metrics_only: bool = True,
+        dedupe_events: bool = False,
     ):
         self.device_id = device_id
         self.rows: list[dict[str, Any]] = []
         self.on_row = on_row
         self.mode = mode
         self.quiet = quiet
+        self.metrics_only = metrics_only
+        self.dedupe_events = dedupe_events
         self.started_at = time.time()
         self.found_device_id: int | None = None
         self.packets_seen = 0
+        self._seen_events: set[tuple[Any, Any, Any]] = set()
 
     def _append(self, row: dict[str, Any]) -> None:
+        if self.metrics_only and not row_has_metrics(row):
+            return
+        if self.dedupe_events and row_has_metrics(row):
+            key = (row.get("device_id"), row.get("page"), row.get("event_count"))
+            if key in self._seen_events:
+                return
+            self._seen_events.add(key)
         self.rows.append(row)
         self.packets_seen += 1
         if self.on_row:
@@ -168,8 +256,9 @@ class SessionRecorder:
             pwr = row.get("instantaneous_power_w")
             cad = row.get("cadence_rpm")
             ev = row.get("event_count")
+            dtype = row.get("device_type_name") or "?"
             print(
-                f"[{row['elapsed_s']:7.1f}s] {row['page_name']:16} "
+                f"[{row['elapsed_s']:7.1f}s] {dtype:16} {row['page_name']:18} "
                 f"ev={ev if ev is not None else '-':>3} "
                 f"P={pwr if pwr is not None else '-':>4} W  "
                 f"cad={cad if cad is not None else '-':>3} rpm  "
@@ -178,8 +267,49 @@ class SessionRecorder:
 
     def run(self, duration_s: float | None = None) -> list[dict[str, Any]]:
         if self.mode == "scan":
-            return self._run_rx_scan(duration_s)
+            try:
+                return self._run_rx_scan(duration_s)
+            except Exception as exc:
+                print(
+                    f"RX-scan non disponibile ({exc}). Fallback a modalità paired...",
+                    flush=True,
+                )
+                # Nuova sessione pulita: la stick potrebbe essere in stato inconsistente.
+                time.sleep(0.5)
+                return self._run_paired(duration_s)
         return self._run_paired(duration_s)
+
+    @staticmethod
+    def _safe_stop(node: Node | None, timeout_s: float = 2.0) -> None:
+        """Ferma Node/USB senza hang infiniti (evita segfault su Ctrl+C)."""
+        if node is None:
+            return
+
+        def _force() -> None:
+            try:
+                node._running = False  # type: ignore[attr-defined]
+            except Exception:
+                pass
+            ant = getattr(node, "ant", None)
+            if ant is not None:
+                try:
+                    ant._running = False
+                except Exception:
+                    pass
+                try:
+                    ant._driver.close()
+                except Exception:
+                    pass
+            for obj in (node, ant):
+                if obj is None:
+                    continue
+                thr = getattr(obj, "_worker_thread", None)
+                if thr is not None and thr.is_alive():
+                    thr.join(timeout_s)
+
+        stopper = threading.Thread(target=_force, daemon=True)
+        stopper.start()
+        stopper.join(timeout_s + 0.5)
 
     def _stop_after(self, node: Node, duration_s: float | None) -> None:
         if duration_s is None:
@@ -187,132 +317,150 @@ class SessionRecorder:
 
         def stop_later() -> None:
             time.sleep(duration_s)
+            # Sblocca node.start()/_main senza join infinito sul worker USB.
             try:
-                node.stop()
+                node._running = False  # type: ignore[attr-defined]
             except Exception:
                 pass
+            ant = getattr(node, "ant", None)
+            if ant is not None:
+                try:
+                    ant._running = False
+                except Exception:
+                    pass
 
         threading.Thread(target=stop_later, daemon=True).start()
 
     def _run_paired(self, duration_s: float | None) -> list[dict[str, Any]]:
-        """Canale PowerMeter classico (period 8182)."""
+        """Canale PowerMeter classico (period 8182) — path affidabile."""
         node = Node()
-        node.set_network_key(0x00, ANTPLUS_NETWORK_KEY)
-        meter = PowerMeter(node, device_id=self.device_id)
-        self.started_at = time.time()
-
-        def on_found() -> None:
-            self.found_device_id = meter.device_id
-            print(f"Connesso (paired) a power meter ANT+ device_id={meter.device_id}")
-
-        original_on_data = meter.on_data
-
-        def on_data_with_raw(data) -> None:
-            original_on_data(data)
-            # Preferisci decode diretto dai byte (include event_count e L/R).
-            decoded = _decode_power_page(data)
-            # Se openant ha calcolato average_power più accurata, usala.
-            if decoded["page"] == 0x10:
-                avg = meter.data["power"].average_power
-                if avg:
-                    decoded["average_power_w"] = avg
-            self._append(
-                make_row(
-                    device_id=meter.device_id,
-                    raw=data,
-                    started_at=self.started_at,
-                    decoded=decoded,
-                )
-            )
-
-        meter.on_found = on_found
-        meter.on_data = on_data_with_raw
-
-        print(
-            "Registrazione PAIRED. Pedala. Ctrl+C per salvare."
-            + (f" (auto-stop {duration_s:.0f}s)" if duration_s else "")
-        )
-        self._stop_after(node, duration_s)
+        meter: PowerMeter | None = None
         try:
-            node.start()
-        except KeyboardInterrupt:
-            print("\nInterrotto dall'utente, salvataggio...")
+            node.set_network_key(0x00, ANTPLUS_NETWORK_KEY)
+            meter = PowerMeter(node, device_id=self.device_id)
+            self.started_at = time.time()
+
+            def on_found() -> None:
+                self.found_device_id = meter.device_id
+                print(f"Connesso (paired) a power meter ANT+ device_id={meter.device_id}")
+
+            original_on_data = meter.on_data
+
+            def on_data_with_raw(data) -> None:
+                original_on_data(data)
+                decoded = _decode_payload(data, device_type=DeviceType.PowerMeter.value)
+                if decoded["page"] == 0x10:
+                    avg = meter.data["power"].average_power
+                    if avg:
+                        decoded["average_power_w"] = avg
+                self._append(
+                    make_row(
+                        device_id=meter.device_id,
+                        raw=data,
+                        started_at=self.started_at,
+                        decoded=decoded,
+                        device_type=DeviceType.PowerMeter.value,
+                    )
+                )
+
+            meter.on_found = on_found
+            meter.on_data = on_data_with_raw
+
+            print(
+                "Registrazione PAIRED. Pedala. Ctrl+C per salvare."
+                + (f" (auto-stop {duration_s:.0f}s)" if duration_s else "")
+            )
+            self._stop_after(node, duration_s)
+            try:
+                node.start()
+            except KeyboardInterrupt:
+                print("\nInterrotto dall'utente, salvataggio...")
         finally:
-            try:
-                meter.close_channel()
-            except Exception:
-                pass
-            try:
-                node.stop()
-            except Exception:
-                pass
+            # Evita close_channel/remove_channel: in errore USB fanno altri timeout da ~10s.
+            self._safe_stop(node)
         print_timing_stats(self.rows)
         return self.rows
 
     def _run_rx_scan(self, duration_s: float | None) -> list[dict[str, Any]]:
         """
         RX scan mode: radio in ricezione continua (duty cycle 100%).
-        Cattura ogni broadcast sulla freq ANT+ indipendentemente dal period,
-        tipicamente più vicino ai ~4 Hz se la Wattbike li trasmette.
+        Se l'apertura fallisce/timeout, run() fa fallback a paired.
         """
         node = Node()
-        node.set_network_key(0x00, ANTPLUS_NETWORK_KEY)
-        self.started_at = time.time()
+        channel: Channel | None = None
+        try:
+            node.set_network_key(0x00, ANTPLUS_NETWORK_KEY)
+            self.started_at = time.time()
+            seen_keys: set[tuple[int, int]] = set()
 
-        channel = node.new_channel(
-            Channel.Type.BIDIRECTIONAL_RECEIVE, 0x00, 0x01  # extended assign
-        )
-        # Wildcard su device_id se 0; filtra a runtime.
-        channel.set_id(self.device_id, DeviceType.PowerMeter.value, 0)
-        channel.enable_extended_messages(1)
-        channel.set_period(DEFAULT_POWER_PERIOD)
-        channel.set_rf_freq(57)
-        channel.set_search_timeout(0xFF)
+            channel = node.new_channel(
+                Channel.Type.BIDIRECTIONAL_RECEIVE, 0x00, 0x01  # extended assign
+            )
+            # Solo PowerMeter (+ FE se stesso stream): meno rumore, setup più stabile.
+            channel.set_id(
+                self.device_id if self.device_id else 0,
+                DeviceType.PowerMeter.value,
+                0,
+            )
+            channel.enable_extended_messages(1)
+            channel.set_period(DEFAULT_POWER_PERIOD)
+            channel.set_rf_freq(57)
+            channel.set_search_timeout(0xFF)
 
-        def on_data(data) -> None:
-            # extended: bytes 9-12 = device_id lo, hi, type, trans
-            device_id = self.device_id
-            if len(data) > 8:
-                device_id = data[9] + (data[10] << 8)
-                device_type = data[11]
-                if device_type != DeviceType.PowerMeter.value:
-                    return
-                if self.device_id and device_id != self.device_id:
-                    return
-            if self.found_device_id is None:
-                self.found_device_id = device_id
-                print(f"Ricezione (rx-scan) da power meter device_id={device_id}")
+            def on_data(data) -> None:
+                device_id = self.device_id or 0
+                device_type: int | None = DeviceType.PowerMeter.value
+                if len(data) > 8:
+                    device_id = data[9] + (data[10] << 8)
+                    device_type = data[11]
+                    if device_type not in INTERESTING_DEVICE_TYPES:
+                        return
+                    if (
+                        self.device_id
+                        and device_type == DeviceType.PowerMeter.value
+                        and device_id != self.device_id
+                    ):
+                        return
+                key = (device_id, device_type if device_type is not None else -1)
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    print(
+                        f"Ricezione (rx-scan) device_id={device_id} "
+                        f"type={_device_type_name(device_type)} ({device_type})"
+                    )
+                if self.found_device_id is None:
+                    self.found_device_id = device_id
 
-            self._append(
-                make_row(device_id=device_id, raw=data, started_at=self.started_at)
+                self._append(
+                    make_row(
+                        device_id=device_id,
+                        raw=data,
+                        started_at=self.started_at,
+                        device_type=device_type,
+                    )
+                )
+
+            channel.on_broadcast_data = on_data
+            channel.on_burst_data = on_data
+            channel.on_acknowledge = on_data
+
+            print(
+                "Registrazione RX-SCAN (solo watt, senza ritrasmissioni). "
+                "Pedala. Ctrl+C per salvare."
+                + (f" (auto-stop {duration_s:.0f}s)" if duration_s else "")
             )
 
-        channel.on_broadcast_data = on_data
-        channel.on_burst_data = on_data
-        channel.on_acknowledge = on_data
-
-        print(
-            "Registrazione RX-SCAN (ascolto continuo). Pedala. Ctrl+C per salvare."
-            + (f" (auto-stop {duration_s:.0f}s)" if duration_s else "")
-        )
-        print("Obiettivo tipico ANT+: ~4 Hz (ogni ~0.25 s).")
-
-        self._stop_after(node, duration_s)
-        try:
-            # open_rx_scan_mode invece di channel.open(): RX al 100%
             channel.open_rx_scan_mode()
-            node.start()
-        except KeyboardInterrupt:
-            print("\nInterrotto dall'utente, salvataggio...")
+            self._stop_after(node, duration_s)
+            try:
+                node.start()
+            except KeyboardInterrupt:
+                print("\nInterrotto dall'utente, salvataggio...")
+        except Exception:
+            self._safe_stop(node)
+            raise
         finally:
-            try:
-                node.remove_channel(channel)
-            except Exception:
-                pass
-            try:
-                node.stop()
-            except Exception:
-                pass
+            self._safe_stop(node)
         print_timing_stats(self.rows)
         return self.rows
 
@@ -321,49 +469,49 @@ def scan_power_meters(timeout_s: float = 20.0) -> list[dict[str, Any]]:
     """Scansiona dispositivi ANT+ PowerMeter (tipo 11) e restituisce gli ID trovati."""
     found: dict[tuple[int, int, int], dict[str, Any]] = {}
     node = Node()
-    node.set_network_key(0x00, ANTPLUS_NETWORK_KEY)
-    scanner = Scanner(node, device_id=0, device_type=DeviceType.PowerMeter.value)
-
-    def on_found(device_tuple) -> None:
-        device_id, device_type, device_trans = device_tuple
-        key = (device_id, device_type, device_trans)
-        if key in found:
-            return
-        info = {
-            "device_id": device_id,
-            "device_type": device_type,
-            "device_type_name": DeviceType(device_type).name,
-            "transmission_type": device_trans,
-        }
-        found[key] = info
-        print(
-            f"Trovato: device_id={device_id}  type={DeviceType(device_type).name} "
-            f"({device_type})  trans={device_trans}"
-        )
-
-    scanner.on_found = on_found
-    print(f"Scansione PowerMeter ANT+ per {timeout_s:.0f}s... Accendi la Wattbike.")
-
-    def stop_later() -> None:
-        time.sleep(timeout_s)
-        try:
-            node.stop()
-        except Exception:
-            pass
-
-    threading.Thread(target=stop_later, daemon=True).start()
     try:
-        node.start()
-    except KeyboardInterrupt:
-        print("\nScansione interrotta.")
+        node.set_network_key(0x00, ANTPLUS_NETWORK_KEY)
+        scanner = Scanner(node, device_id=0, device_type=DeviceType.PowerMeter.value)
+
+        def on_found(device_tuple) -> None:
+            device_id, device_type, device_trans = device_tuple
+            key = (device_id, device_type, device_trans)
+            if key in found:
+                return
+            info = {
+                "device_id": device_id,
+                "device_type": device_type,
+                "device_type_name": DeviceType(device_type).name,
+                "transmission_type": device_trans,
+            }
+            found[key] = info
+            print(
+                f"Trovato: device_id={device_id}  type={DeviceType(device_type).name} "
+                f"({device_type})  trans={device_trans}"
+            )
+
+        scanner.on_found = on_found
+        print(f"Scansione PowerMeter ANT+ per {timeout_s:.0f}s... Accendi la Wattbike.")
+
+        def stop_later() -> None:
+            time.sleep(timeout_s)
+            try:
+                node._running = False  # type: ignore[attr-defined]
+            except Exception:
+                pass
+            ant = getattr(node, "ant", None)
+            if ant is not None:
+                try:
+                    ant._running = False
+                except Exception:
+                    pass
+
+        threading.Thread(target=stop_later, daemon=True).start()
+        try:
+            node.start()
+        except KeyboardInterrupt:
+            print("\nScansione interrotta.")
     finally:
-        try:
-            scanner.close_channel()
-        except Exception:
-            pass
-        try:
-            node.stop()
-        except Exception:
-            pass
+        SessionRecorder._safe_stop(node)
 
     return list(found.values())

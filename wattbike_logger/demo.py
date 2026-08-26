@@ -40,7 +40,12 @@ def generate_demo_rows(seconds: float = 30.0, hz: float = 4.0, device_id: int = 
                 (power >> 8) & 0xFF,
             ]
         )
-        row = make_row(device_id=device_id, raw=raw, started_at=started)
+        row = make_row(
+            device_id=device_id,
+            raw=raw,
+            started_at=started,
+            device_type=11,  # PowerMeter
+        )
         row["elapsed_s"] = round(t, 3)
         rows.append(row)
 

@@ -61,10 +61,13 @@ Annota il `device_id` stampato (es. `12345`).
 ### 2) Registra e salva Excel
 
 ```bash
-# default: RX-scan (ascolto continuo, mira a ~4 Hz se la bici li trasmette)
+# default: RX-scan (radio al 100%) — cattura quasi tutti i broadcast (~0.25 s)
 python -m wattbike_logger record -i 54434 -o sessione.xlsx --csv
 
-# modalità canale classico (come le prime prove)
+# solo quando i watt cambiano davvero (1 riga ≈ 1 pedalata)
+python -m wattbike_logger record -i 54434 -o sessione.xlsx --csv --unique-events
+
+# canale paired (sconsigliato: spesso 1 pacchetto su 3–4)
 python -m wattbike_logger record -i 54434 --mode paired -o sessione.xlsx
 ```
 
@@ -72,12 +75,13 @@ Alla fine della sessione stampa la **frequenza reale** ricevuta (Hz e dt mediano
 
 ### Frequenza dati (0.2 s?)
 
-- Lo standard ANT+ Bicycle Power è **~4 Hz ≈ ogni 0.25 s** (non 0.2 s).
-- Il logger **non impone** 2.5 s: salva ogni pacchetto che arriva dalla chiavetta.
-- Nelle prime prove (~30 W, ~40 rpm) arrivavano aggiornamenti ogni **~2.2–2.5 s**: tipico se la Wattbike aggiorna in modo event-synchronous (per pedalata) e/o se il canale paired perde pacchetti.
-- Per avvicinarsi a 0.25 s: usa `--mode scan`, pedala a cadenza più alta (es. 80–90 rpm), chiudi Zwift/altri app ANT, tieni la stick vicina.
-- **0.20 s esatti (5 Hz)** non sono previsti dal profilo ANT+ power; al massimo ~0.25 s, oppure interpolazione offline (non più “raw”).
+Due livelli diversi:
 
+1. **Broadcast ANT+** (~4 Hz, ogni **~0.25 s**): la bici *ritrasmette* lo stesso pacchetto. Con `--mode scan` (default) la stick ascolta al 100% e li prende quasi tutti. In `--mode paired` il canale “a sincronismo” ne perde molti → nei test ~ogni **2.2 s** (salta `event_count`).
+2. **Watt davvero nuovi**: sulla Wattbike l’`event_count` sale circa **1 volta per giro di pedale**. A 90 rpm ≈ ogni **0.67 s** (non ogni 0.2 s). Non si può inventare potenza più veloce di così dallo stream ANT+.
+
+- **0.20 s esatti (5 Hz) di watt grezzi**: non previsti. Opzioni: usare i broadcast a 0.25 s, oppure **interpolare offline** sulla griglia 0.2 s (non più raw).
+- Se RX-scan va in timeout: scollega/ricollega la chiavetta; il logger fa fallback automatico a paired.
 ### 3) Prova senza hardware (demo)
 
 ```bash

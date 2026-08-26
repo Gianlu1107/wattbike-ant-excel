@@ -36,17 +36,21 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
 def cmd_record(args: argparse.Namespace) -> int:
     out = Path(args.output) if args.output else _default_output("wattbike")
+    # Per massima densità: in scan non dedupe (tiene anche ritrasmissioni ~0.25s).
+    dedupe = args.unique_events
     recorder = SessionRecorder(
         device_id=args.device_id,
         mode=args.mode,
         quiet=args.quiet,
+        dedupe_events=dedupe,
     )
     try:
         rows = recorder.run(duration_s=args.duration)
     except Exception as exc:
         print(f"Errore ANT+/USB: {exc}", file=sys.stderr)
         print(
-            "Controlla chiavetta, driver (Zadig su Windows / udev su Linux) e che nessun altro software usi la stick (Zwift, ecc.).",
+            "Controlla chiavetta (scollega/ricollega), chiudi Zwift/altri app ANT, "
+            "e riprova. Su macOS a volte serve ristaccare dopo un timeout.",
             file=sys.stderr,
         )
         return 2
@@ -126,7 +130,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--mode",
         choices=("scan", "paired"),
         default="scan",
-        help="scan=RX continuo (default, più pacchetti); paired=canale PowerMeter classico",
+        help="scan=RX continuo al 100%% (default, più pacchetti); paired=canale classico (ne perde molti)",
+    )
+    p_rec.add_argument(
+        "--unique-events",
+        action="store_true",
+        help="Salva solo quando cambia event_count (meno righe, solo watt 'nuovi')",
     )
     p_rec.add_argument("--quiet", action="store_true", help="Meno output a schermo")
     p_rec.add_argument("--csv", action="store_true", help="Scrive anche un .csv accanto all'xlsx")

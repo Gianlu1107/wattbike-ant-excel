@@ -13,6 +13,8 @@ COLUMNS: Sequence[str] = (
     "timestamp_iso",
     "elapsed_s",
     "device_id",
+    "device_type",
+    "device_type_name",
     "page",
     "page_name",
     "event_count",
@@ -61,7 +63,7 @@ def write_xlsx(path: Path, rows: Iterable[dict[str, Any]], meta: dict[str, Any] 
     payload = {
         "exported_at": datetime.now().isoformat(timespec="seconds"),
         "rows": count,
-        "note": "Dati raw ANT+ Bicycle Power dalla Wattbike (o mock). Nessuna elaborazione applicata.",
+        "note": "Dati ANT+ Power/FE con watt (pagine info e S&C esclusi).",
         **(meta or {}),
     }
     for key, value in payload.items():
