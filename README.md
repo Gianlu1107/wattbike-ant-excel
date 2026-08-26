@@ -14,11 +14,28 @@ Dalla [pagina Releases](https://github.com/Gianlu1107/wattbike-ant-excel/release
 | `WattbikeLogger-macos-arm64.pkg` | macOS Apple Silicon (Installer.app) |
 | `WattbikeLogger-linux-x64.deb` | Linux x64 (Debian/Ubuntu) |
 
+> Su macOS, se l’auto-update da una versione vecchia fallisce, installa il `.pkg` a mano (non usare “Aggiorna” da v1.3.2).
+
 > macOS Intel: i runner GitHub `macos-13` non sono più disponibili; su Intel usa `pip install` + `python -m wattbike_logger`, oppure una macchina Apple Silicon.
 
 ### Installazione
 
-**macOS** — doppio click sul `.pkg` → segui i passaggi (Benvenuto → Licenza → Installa). L’app va in **Applicazioni** e si apre senza Terminale. Se Gatekeeper blocca: clic destro → Apri → Apri.
+**macOS** — doppio click sul `.pkg` e segui i passaggi (Benvenuto → Licenza → Installa). L’app va in **Applicazioni** e si apre senza Terminale.
+
+> **Se compare “Apple could not verify…” / “Not Opened”** (normale: l’installer non è ancora notarizzato da Apple): non cestinare il file.
+>
+> 1. Clicca **Done** / Fine  
+> 2. Apri **Impostazioni di Sistema → Privacy e sicurezza**  
+> 3. Scorri in basso: compare un messaggio su `WattbikeLogger-macos-arm64.pkg` → **Apri comunque**  
+> 4. Conferma di nuovo **Apri**
+>
+> In alternativa, una sola riga nel Terminale (sostituisci il percorso se serve):
+>
+> ```bash
+> xattr -cr ~/Downloads/WattbikeLogger-macos-arm64.pkg && open ~/Downloads/WattbikeLogger-macos-arm64.pkg
+> ```
+>
+> La rimozione completa di questo avviso richiede un account **Apple Developer** (firma + notarizzazione). Se lo attivi, si può configurare in CI.
 
 **Windows** — esegui `WattbikeLogger-windows-x64-Setup.exe` e segui il wizard (cartella, scorciatoie, Avvia). SmartScreen: Altre info → Esegui comunque.
 
@@ -31,7 +48,7 @@ sudo apt install ./WattbikeLogger-linux-x64.deb
 
 All’avvio l’app verifica i driver ANT+ e cerca aggiornamenti.
 
-Per pubblicare una release: `git tag v1.3.3 && git push origin v1.3.3` (GitHub Actions crea pkg / Setup.exe / deb).
+Per pubblicare una release: `git tag v1.3.4 && git push origin v1.3.4` (GitHub Actions crea pkg / Setup.exe / deb + zip app).
 
 ## Requisiti (da sorgente)
 

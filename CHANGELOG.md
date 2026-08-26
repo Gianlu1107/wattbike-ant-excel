@@ -1,33 +1,25 @@
 # Changelog
 
+## 1.3.4
+
+- Fix auto-update su macOS: non sostituire più l’app con un `.pkg` (`Exec format error`)
+- L’updater apre il `.pkg` / Setup / `.deb`, oppure aggiorna da zip `.app`
+- Release include anche `WattbikeLogger-macos-arm64-app.zip` per client 1.3.2
+- Documentazione Gatekeeper (Privacy e sicurezza / `xattr`)
+
 ## 1.3.3
 
-- Installer nativi (niente zip): macOS `.pkg` (Installer.app a step), Windows `Setup.exe` (Inno Setup), Linux `.deb`
-- Auto-update apre il nuovo installer invece di sostituire a mano il binario
+- Installer nativi: macOS `.pkg`, Windows `Setup.exe`, Linux `.deb`
 
 ## 1.3.2
 
 - Fix crash driver status (`accessible`)
-- GUI windowed senza console; grafici con assi/griglia/scale utili
-- Start disabilitato se nessuna chiavetta ANT+ è collegata
+- GUI windowed; grafici con assi/griglia; Start senza chiavetta disabilitato
 
 ## 1.3.1
 
-- Grafici in tkinter puro (niente matplotlib/numpy) → eseguibili più leggeri
-- CI: action aggiornate a runtime Node 24; UPX dove disponibile
+- Grafici tkinter puro; CI Node 24; UPX
 
 ## 1.3.0
 
-- GUI desktop (Start/Stop, countdown 3-2-1-VIA, live metrics, charts)
-- Auto-setup driver ANT+ per Windows / macOS / Linux
-- Auto-update da GitHub Releases
-- Build multi-piattaforma (Windows x64, macOS arm64, Linux x64)
-- Registrazione RX-scan con fallback paired; export Excel/CSV
-
-## 1.2.0
-
-- Interfaccia grafica iniziale e packaging PyInstaller
-
-## 1.1.0
-
-- RX-scan, filtro metriche, frequenza/cadenza documentate
+- GUI desktop, driver auto, aggiornamenti, build multi-OS, RX-scan

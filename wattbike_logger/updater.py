@@ -101,8 +101,10 @@ def _pick_asset(assets: list[dict]) -> dict | None:
             if lower.endswith(ext):
                 s += 40 - i * 5
                 break
-        if "setup" in lower or lower.endswith(".pkg") or lower.endswith(".msi") or lower.endswith(".deb"):
-            s += 25  # installer nativo
+        if lower.endswith(".zip"):
+            s += 30  # preferisci zip .app per auto-update (client vecchi non gestiscono .pkg)
+        if lower.endswith(".pkg") or lower.endswith(".msi") or lower.endswith(".deb") or "setup" in lower:
+            s += 20  # installer nativo (download manuale / client nuovi)
         if "wattbike" in lower:
             s += 3
         if sys.platform != "darwin" and "macos" in lower:
@@ -201,14 +203,89 @@ def _find_in_tree(root: Path, patterns: tuple[str, ...]) -> Path | None:
     return None
 
 
+def _file_magic(path: Path, n: int = 8) -> bytes:
+    try:
+        with path.open("rb") as fh:
+            return fh.read(n)
+    except OSError:
+        return b""
+
+
+def _is_mach_o(path: Path) -> bool:
+    mag = _file_magic(path, 4)
+    return mag in (
+        b"\xfe\xed\xfa\xce",
+        b"\xce\xfa\xed\xfe",
+        b"\xfe\xed\xfa\xcf",
+        b"\xcf\xfa\xed\xfe",
+        b"\xca\xfe\xba\xbe",
+    )
+
+
+def _is_pe_exe(path: Path) -> bool:
+    return _file_magic(path, 2) == b"MZ"
+
+
+def _is_macos_pkg(path: Path) -> bool:
+    """pkg/xar oppure estensione .pkg."""
+    if path.suffix.lower() == ".pkg":
+        return True
+    return _file_magic(path, 4) == b"xar!"
+
+
+def _open_native_installer(path: Path, status: Callable[[str], None]) -> None:
+    """Avvia installer nativo e termina il processo corrente."""
+    lower = path.name.lower()
+    if sys.platform == "darwin" or _is_macos_pkg(path) or lower.endswith(".dmg"):
+        status("Apertura Installer macOS…")
+        # Rimuove quarantena sul pkg scaricato così Installer può partire
+        try:
+            subprocess.run(["xattr", "-cr", str(path)], check=False, capture_output=True)
+        except OSError:
+            pass
+        subprocess.Popen(["open", str(path)], start_new_session=True)
+        sys.exit(0)
+    if lower.endswith(".msi") or (lower.endswith(".exe") and "setup" in lower):
+        status("Avvio Setup Windows…")
+        tmp = path.parent
+        bat = tmp / "run_setup.bat"
+        bat.write_text(
+            f"""@echo off
+setlocal
+set PID={os.getpid()}
+:wait
+tasklist /FI "PID eq %PID%" 2>NUL | find "%PID%" >NUL
+if not errorlevel 1 (
+  timeout /t 1 /nobreak >NUL
+  goto wait
+)
+start "" "{path}"
+del "%~f0" >NUL 2>&1
+""",
+            encoding="utf-8",
+        )
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        subprocess.Popen(["cmd.exe", "/c", str(bat)], creationflags=flags, close_fds=True)
+        sys.exit(0)
+    if lower.endswith(".deb"):
+        status("Apertura pacchetto .deb…")
+        opener = shutil.which("xdg-open") or shutil.which("gnome-open")
+        if opener:
+            subprocess.Popen([opener, str(path)], start_new_session=True)
+        else:
+            subprocess.Popen(["pkexec", "dpkg", "-i", str(path)], start_new_session=True)
+        sys.exit(0)
+    raise RuntimeError(f"Formato installer non gestito: {path.name}")
+
+
 def apply_update(
     release: ReleaseInfo,
     on_progress: Callable[[int, int], None] | None = None,
     on_status: Callable[[str], None] | None = None,
 ) -> None:
     """
-    Scarica l'installer della nuova versione e lo avvia (pkg / Setup.exe / deb),
-    oppure sostituisce il binario se l'asset è ancora un pacchetto legacy.
+    Scarica l'aggiornamento: apre pkg/Setup/deb, oppure sostituisce .app/binario da zip.
+    Non sovrascrive mai l'eseguibile con un .pkg (causava Errno 8 Exec format error).
     """
     exe = frozen_executable()
     if exe is None:
@@ -224,47 +301,33 @@ def apply_update(
     download_file(release.asset_url, download_path, on_progress=on_progress)
     lower = release.asset_name.lower()
 
-    # Installer nativi: apri e chiudi l'app corrente
-    if lower.endswith(".pkg") or lower.endswith(".dmg"):
-        status("Apertura Installer macOS…")
-        subprocess.Popen(["open", str(download_path)], start_new_session=True)
-        sys.exit(0)
-    if lower.endswith(".msi") or (lower.endswith(".exe") and "setup" in lower):
-        status("Avvio Setup Windows…")
-        bat = tmp_dir / "run_setup.bat"
-        bat.write_text(
-            f"""@echo off
-setlocal
-set PID={os.getpid()}
-:wait
-tasklist /FI "PID eq %PID%" 2>NUL | find "%PID%" >NUL
-if not errorlevel 1 (
-  timeout /t 1 /nobreak >NUL
-  goto wait
-)
-start "" "{download_path}"
-del "%~f0" >NUL 2>&1
-""",
-            encoding="utf-8",
-        )
-        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
-        subprocess.Popen(["cmd.exe", "/c", str(bat)], creationflags=flags, close_fds=True)
-        sys.exit(0)
-    if lower.endswith(".deb"):
-        status("Apertura pacchetto .deb…")
-        opener = shutil.which("xdg-open") or shutil.which("gnome-open")
-        if opener:
-            subprocess.Popen([opener, str(download_path)], start_new_session=True)
-        else:
-            subprocess.Popen(["pkexec", "dpkg", "-i", str(download_path)], start_new_session=True)
-        sys.exit(0)
+    # Installer nativi (anche se il nome non combacia: magic xar!)
+    if (
+        lower.endswith((".pkg", ".dmg", ".deb", ".msi"))
+        or (lower.endswith(".exe") and "setup" in lower)
+        or _is_macos_pkg(download_path)
+    ):
+        _open_native_installer(download_path, status)
+        return
 
     payload = _unpack_if_zip(download_path, tmp_dir)
+
+    # Zip che contiene solo un .pkg
+    if payload.is_dir():
+        nested_pkg = _find_in_tree(payload, ("*.pkg",))
+        if nested_pkg is not None and nested_pkg.is_file():
+            _open_native_installer(nested_pkg, status)
+            return
 
     if sys.platform.startswith("win"):
         new_exe = payload if payload.is_file() else _find_in_tree(payload, ("WattbikeLogger*.exe", "*.exe"))
         if new_exe is None or not new_exe.is_file():
             raise RuntimeError("Nessun .exe trovato nel pacchetto di aggiornamento.")
+        if not _is_pe_exe(new_exe):
+            raise RuntimeError(
+                f"Il file scaricato non è un eseguibile Windows valido ({new_exe.name}). "
+                "Scarica il Setup dalla pagina Releases."
+            )
         _install_windows(exe, new_exe, status)
     elif sys.platform == "darwin":
         _install_macos(exe, payload, status)
@@ -272,6 +335,13 @@ del "%~f0" >NUL 2>&1
         new_bin = payload if payload.is_file() else _find_in_tree(payload, ("WattbikeLogger*",))
         if new_bin is None or not new_bin.is_file():
             raise RuntimeError("Nessun binario trovato nel pacchetto di aggiornamento.")
+        if not (os.access(new_bin, os.X_OK) or _is_mach_o(new_bin)):
+            # ELF inizia con \x7fELF
+            if _file_magic(new_bin, 4) != b"\x7fELF":
+                raise RuntimeError(
+                    f"Il file scaricato non è un binario eseguibile ({new_bin.name}). "
+                    "Scarica il .deb dalla pagina Releases."
+                )
         _install_posix(exe, new_bin, status)
 
 
@@ -286,24 +356,22 @@ def _macos_app_bundle(exe: Path) -> Path | None:
 
 def _install_macos(current_exe: Path, payload: Path, status: Callable[[str], None]) -> None:
     status("Installazione aggiornamento macOS...")
+    if payload.is_file() and (_is_macos_pkg(payload) or payload.suffix.lower() == ".dmg"):
+        _open_native_installer(payload, status)
+        return
+
     app = None
     if payload.is_dir() and payload.name.endswith(".app"):
         app = payload
     elif payload.is_dir():
-        app = _find_in_tree(payload, ("WattbikeLogger.app", "*.app"))
-        if app is not None and not str(app).endswith(".app"):
-            app = None
-        # rglob('*.app') returns the .app directory itself
-        if app is None:
-            for p in payload.rglob("*"):
-                if p.is_dir() and p.name.endswith(".app"):
-                    app = p
-                    break
+        for p in payload.rglob("*"):
+            if p.is_dir() and p.name.endswith(".app"):
+                app = p
+                break
 
     current_app = _macos_app_bundle(current_exe)
     if app is not None and current_app is not None:
         dest = current_app
-        # Preferisci /Applications se l'app corrente è lì o esiste già
         apps_dest = Path("/Applications") / app.name
         if str(current_app).startswith("/Applications") or apps_dest.exists():
             dest = apps_dest
@@ -327,17 +395,28 @@ rm -f "$0"
         status("Riavvio in corso...")
         sys.exit(0)
 
-    # Fallback: binario onefile
     new_bin = payload if payload.is_file() else _find_in_tree(payload, ("WattbikeLogger*",))
     if new_bin is None or not new_bin.is_file():
-        raise RuntimeError("WattbikeLogger.app non trovato nel pacchetto.")
+        raise RuntimeError(
+            "WattbikeLogger.app non trovato nel pacchetto.\n"
+            "Installa manualmente il .pkg dalla pagina Releases."
+        )
+    if _is_macos_pkg(new_bin) or not _is_mach_o(new_bin):
+        if _is_macos_pkg(new_bin):
+            _open_native_installer(new_bin, status)
+            return
+        raise RuntimeError(
+            f"Aggiornamento non valido ({new_bin.name}): non è un'app macOS.\n"
+            "Scarica WattbikeLogger-macos-arm64.pkg dalla pagina Releases."
+        )
     _install_posix(current_exe, new_bin, status)
 
 
 def _install_windows(current_exe: Path, new_file: Path, status: Callable[[str], None]) -> None:
     status("Preparazione installazione Windows...")
+    if not _is_pe_exe(new_file):
+        raise RuntimeError(f"Non è un eseguibile Windows valido: {new_file.name}")
     bat = current_exe.with_suffix(".update.bat")
-    # Attende la fine del PID, sostituisce, rilancia, cancella se stesso.
     script = f"""@echo off
 setlocal
 set PID={os.getpid()}
@@ -355,7 +434,6 @@ del "%NEW%" >NUL 2>&1
 del "%~f0" >NUL 2>&1
 """
     bat.write_text(script, encoding="utf-8")
-    # CREATE_NO_WINDOW = 0x08000000 — niente console flash
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
     subprocess.Popen(
         ["cmd.exe", "/c", str(bat)],
@@ -368,7 +446,17 @@ del "%~f0" >NUL 2>&1
 
 def _install_posix(current_exe: Path, new_file: Path, status: Callable[[str], None]) -> None:
     status("Installazione aggiornamento...")
-    # Su macOS/Linux l'exe in esecuzione può spesso essere sostituito su disco.
+    if _is_macos_pkg(new_file) or new_file.suffix.lower() in {".pkg", ".dmg", ".deb", ".zip"}:
+        raise RuntimeError(
+            f"Non posso sostituire l'app con {new_file.name}. "
+            "Usa l'installer dalla pagina Releases."
+        )
+    if sys.platform == "darwin" and not _is_mach_o(new_file):
+        raise RuntimeError(
+            f"File non eseguibile ({new_file.name}). "
+            "Installa il .pkg dalla pagina Releases."
+        )
+
     backup = current_exe.with_suffix(current_exe.suffix + ".bak")
     try:
         if backup.exists():
@@ -378,7 +466,6 @@ def _install_posix(current_exe: Path, new_file: Path, status: Callable[[str], No
         os.chmod(current_exe, 0o755)
         new_file.unlink(missing_ok=True)
     except OSError:
-        # Fallback: script shell
         sh = current_exe.with_suffix(".update.sh")
         sh.write_text(
             f"""#!/bin/bash

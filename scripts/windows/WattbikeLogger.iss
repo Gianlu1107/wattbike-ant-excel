@@ -3,7 +3,7 @@
 ; Variabili da CI: MyAppVersion, SourceExe, OutputDir
 
 #ifndef MyAppVersion
-  #define MyAppVersion "1.3.3"
+  #define MyAppVersion "1.3.4"
 #endif
 #ifndef SourceExe
   #define SourceExe "..\..\dist\WattbikeLogger-windows-x64.exe"

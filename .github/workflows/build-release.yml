@@ -104,8 +104,37 @@ jobs:
           }
           Get-Item "out\${{ matrix.artifact }}" | Format-List Name, Length
 
+      - name: Import Apple signing certificate (optional)
+        if: runner.os == 'macOS'
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -z "${MACOS_CERTIFICATE_P12:-}" ]; then
+            echo "Nessun certificato Apple nei secret — pkg non firmato (Gatekeeper avviserà)."
+            exit 0
+          fi
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$CERT_PATH"
+          KEYCHAIN="$RUNNER_TEMP/app-signing.keychain-db"
+          KEYCHAIN_PASS="$(openssl rand -base64 24)"
+          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          security import "$CERT_PATH" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security list-keychain -d user -s "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN"
+          rm -f "$CERT_PATH"
+          echo "Certificato importato nel keychain di CI."
+
       - name: Package macOS .pkg (Installer)
         if: runner.os == 'macOS'
+        env:
+          MACOS_SIGN_IDENTITY_APP: ${{ secrets.MACOS_SIGN_IDENTITY_APP }}
+          MACOS_SIGN_IDENTITY_INSTALLER: ${{ secrets.MACOS_SIGN_IDENTITY_INSTALLER }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         run: |
           chmod +x scripts/macos/pkg/build_pkg.sh scripts/macos/pkg/scripts/postinstall
           if [ ! -d dist/WattbikeLogger.app ]; then
@@ -119,7 +148,13 @@ jobs:
             "out" \
             "macos-arm64"
           test -f "out/${{ matrix.artifact }}"
-          ls -lh "out/${{ matrix.artifact }}"
+          # Zip .app per auto-update dai client 1.3.x che non sanno aprire .pkg
+          xattr -cr dist/WattbikeLogger.app || true
+          (
+            cd dist
+            zip -r -y "../out/WattbikeLogger-macos-arm64-app.zip" WattbikeLogger.app
+          )
+          ls -lh out/WattbikeLogger-macos-arm64.pkg out/WattbikeLogger-macos-arm64-app.zip
 
       - name: Package Linux .deb
         if: runner.os == 'Linux'
@@ -133,7 +168,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.exe_name }}
-          path: out/${{ matrix.artifact }}
+          path: out/*
 
   release:
     needs: build
@@ -148,7 +183,7 @@ jobs:
       - name: Flatten assets
         run: |
           mkdir -p dist
-          find release-assets -type f \( -name '*.pkg' -o -name '*.exe' -o -name '*.msi' -o -name '*.deb' \) -exec cp {} dist/ \;
+          find release-assets -type f \( -name '*.pkg' -o -name '*.exe' -o -name '*.msi' -o -name '*.deb' -o -name '*.zip' \) -exec cp {} dist/ \;
           ls -lah dist
           test "$(ls -A dist)"
 
