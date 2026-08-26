@@ -67,7 +67,7 @@ def _http_json(url: str, timeout: float = 12.0) -> dict:
 
 
 def _pick_asset(assets: list[dict]) -> dict | None:
-    """Sceglie l'asset eseguibile/zip per la piattaforma/architettura corrente."""
+    """Sceglie l'installer nativo per la piattaforma/architettura corrente."""
     names = [(a.get("name") or "", a) for a in assets]
     mach = platform.machine().lower()
 
@@ -75,21 +75,21 @@ def _pick_asset(assets: list[dict]) -> dict | None:
         keys = ["windows-x64", "windows", "win"]
         if mach in ("arm64", "aarch64"):
             keys = ["windows-arm64", "windows-arm", "windows"]
-        exts = (".zip", ".exe")
+        preferred_exts = (".exe", ".msi", ".zip")
     elif sys.platform == "darwin":
         if mach in ("arm64", "aarch64"):
             keys = ["macos-arm64", "darwin-arm64", "macos-arm", "arm64"]
         else:
             keys = ["macos-x64", "macos-amd64", "macos-x86_64", "darwin-x64", "x86_64", "x64"]
         keys += ["macos", "darwin", "mac"]
-        exts = (".zip", ".dmg", "")
+        preferred_exts = (".pkg", ".dmg", ".zip")
     else:
         if mach in ("aarch64", "arm64"):
             keys = ["linux-arm64", "linux-aarch64", "arm64"]
         else:
             keys = ["linux-x64", "linux-amd64", "linux-x86_64", "x86_64", "x64"]
         keys += ["linux"]
-        exts = (".zip", ".AppImage", ".tar.gz", "")
+        preferred_exts = (".deb", ".AppImage", ".rpm", ".zip")
 
     def score(name: str) -> int:
         lower = name.lower()
@@ -97,16 +97,20 @@ def _pick_asset(assets: list[dict]) -> dict | None:
         for i, key in enumerate(keys):
             if key in lower:
                 s += 100 - i
-        if any(lower.endswith(ext) for ext in exts if ext):
-            s += 10
-        if lower.endswith(".zip"):
-            s += 15  # preferisci pacchetto installer
+        for i, ext in enumerate(preferred_exts):
+            if lower.endswith(ext):
+                s += 40 - i * 5
+                break
+        if "setup" in lower or lower.endswith(".pkg") or lower.endswith(".msi") or lower.endswith(".deb"):
+            s += 25  # installer nativo
         if "wattbike" in lower:
             s += 3
         if sys.platform != "darwin" and "macos" in lower:
             s -= 50
-        if not sys.platform.startswith("win") and lower.endswith(".exe"):
-            s -= 50
+        if not sys.platform.startswith("win") and ("windows" in lower or (lower.endswith(".exe") and "setup" not in lower and "linux" not in lower)):
+            # penalizza exe Windows su altre piattaforme; Setup.exe è comunque win-only via keys
+            if not sys.platform.startswith("win"):
+                s -= 50
         if not sys.platform.startswith("linux") and "linux" in lower:
             s -= 40
         return s
@@ -203,8 +207,8 @@ def apply_update(
     on_status: Callable[[str], None] | None = None,
 ) -> None:
     """
-    Scarica il nuovo pacchetto (zip o binario) e sostituisce l'installazione corrente.
-    Su Windows usa uno script .bat che aspetta la chiusura del processo.
+    Scarica l'installer della nuova versione e lo avvia (pkg / Setup.exe / deb),
+    oppure sostituisce il binario se l'asset è ancora un pacchetto legacy.
     """
     exe = frozen_executable()
     if exe is None:
@@ -218,6 +222,43 @@ def apply_update(
     tmp_dir = Path(tempfile.mkdtemp(prefix="wattbike_update_"))
     download_path = tmp_dir / release.asset_name
     download_file(release.asset_url, download_path, on_progress=on_progress)
+    lower = release.asset_name.lower()
+
+    # Installer nativi: apri e chiudi l'app corrente
+    if lower.endswith(".pkg") or lower.endswith(".dmg"):
+        status("Apertura Installer macOS…")
+        subprocess.Popen(["open", str(download_path)], start_new_session=True)
+        sys.exit(0)
+    if lower.endswith(".msi") or (lower.endswith(".exe") and "setup" in lower):
+        status("Avvio Setup Windows…")
+        bat = tmp_dir / "run_setup.bat"
+        bat.write_text(
+            f"""@echo off
+setlocal
+set PID={os.getpid()}
+:wait
+tasklist /FI "PID eq %PID%" 2>NUL | find "%PID%" >NUL
+if not errorlevel 1 (
+  timeout /t 1 /nobreak >NUL
+  goto wait
+)
+start "" "{download_path}"
+del "%~f0" >NUL 2>&1
+""",
+            encoding="utf-8",
+        )
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        subprocess.Popen(["cmd.exe", "/c", str(bat)], creationflags=flags, close_fds=True)
+        sys.exit(0)
+    if lower.endswith(".deb"):
+        status("Apertura pacchetto .deb…")
+        opener = shutil.which("xdg-open") or shutil.which("gnome-open")
+        if opener:
+            subprocess.Popen([opener, str(download_path)], start_new_session=True)
+        else:
+            subprocess.Popen(["pkexec", "dpkg", "-i", str(download_path)], start_new_session=True)
+        sys.exit(0)
+
     payload = _unpack_if_zip(download_path, tmp_dir)
 
     if sys.platform.startswith("win"):

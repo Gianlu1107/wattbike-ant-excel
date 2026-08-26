@@ -19,15 +19,15 @@ jobs:
         include:
           - os: windows-latest
             exe_name: WattbikeLogger-windows-x64
-            artifact: WattbikeLogger-windows-x64.zip
+            artifact: WattbikeLogger-windows-x64-Setup.exe
             libusb: windows
           - os: macos-14
             exe_name: WattbikeLogger-macos-arm64
-            artifact: WattbikeLogger-macos-arm64.zip
+            artifact: WattbikeLogger-macos-arm64.pkg
             libusb: macos
           - os: ubuntu-22.04
             exe_name: WattbikeLogger-linux-x64
-            artifact: WattbikeLogger-linux-x64.zip
+            artifact: WattbikeLogger-linux-x64.deb
             libusb: linux
 
     runs-on: ${{ matrix.os }}
@@ -41,20 +41,30 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Read version
+        id: ver
+        shell: bash
+        run: |
+          V=$(python -c "import re; print(re.search(r'__version__\s*=\s*\"([^\"]+)\"', open('wattbike_logger/__init__.py').read()).group(1))")
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Version $V"
+
       - name: Install libusb (macOS)
         if: matrix.libusb == 'macos'
         run: brew install libusb
 
-      - name: Install libusb + zip tools (Linux)
+      - name: Install libusb + packaging (Linux)
         if: matrix.libusb == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libusb-1.0-0 libusb-1.0-0-dev libudev-dev upx-ucl zip
+          sudo apt-get install -y libusb-1.0-0 libusb-1.0-0-dev libudev-dev upx-ucl dpkg-dev
 
-      - name: Install UPX (Windows)
+      - name: Install UPX + Inno Setup (Windows)
         if: matrix.libusb == 'windows'
         shell: pwsh
-        run: choco install upx -y --no-progress
+        run: |
+          choco install upx -y --no-progress
+          choco install innosetup -y --no-progress
 
       - name: Install dependencies
         run: |
@@ -67,63 +77,56 @@ jobs:
           WATTBIKE_EXE_NAME: ${{ matrix.exe_name }}
         run: pyinstaller --noconfirm WattbikeLogger.spec
 
-      - name: Package Windows zip
+      - name: Package Windows Setup.exe (Inno Setup)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path out/pkg | Out-Null
+          New-Item -ItemType Directory -Force -Path out | Out-Null
           $exe = if (Test-Path "dist/WattbikeLogger-windows-x64.exe") {
-            "dist/WattbikeLogger-windows-x64.exe"
+            (Resolve-Path "dist/WattbikeLogger-windows-x64.exe").Path
           } elseif (Test-Path "dist/WattbikeLogger.exe") {
-            "dist/WattbikeLogger.exe"
-          } else { throw "exe missing"; }
-          Copy-Item $exe out/pkg/WattbikeLogger-windows-x64.exe
-          Copy-Item "scripts/windows/Install-WattbikeLogger.ps1" out/pkg/
-          Compress-Archive -Path out/pkg/* -DestinationPath "out/${{ matrix.artifact }}" -Force
-          Get-Item "out/${{ matrix.artifact }}" | Format-List Name, Length
+            (Resolve-Path "dist/WattbikeLogger.exe").Path
+          } else { throw "exe missing" }
+          $iscc = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "${env:LOCALAPPDATA}\Programs\Inno Setup 6\ISCC.exe",
+            "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { throw "ISCC.exe (Inno Setup) not found" }
+          & $iscc `
+            "/DMyAppVersion=${{ steps.ver.outputs.version }}" `
+            "/DSourceExe=$exe" `
+            "/DOutputDir=$pwd\out" `
+            "scripts\windows\WattbikeLogger.iss"
+          if (-not (Test-Path "out\${{ matrix.artifact }}")) {
+            Get-ChildItem out -Recurse | Format-Table Name, Length
+            throw "Setup.exe missing"
+          }
+          Get-Item "out\${{ matrix.artifact }}" | Format-List Name, Length
 
-      - name: Package macOS zip (.app + installer)
+      - name: Package macOS .pkg (Installer)
         if: runner.os == 'macOS'
         run: |
-          mkdir -p out/pkg
-          if [ -d dist/WattbikeLogger.app ]; then
-            # Pulisce xattr prima della firma ad-hoc (evita "resource fork ... not allowed")
-            xattr -cr dist/WattbikeLogger.app || true
-            codesign --force --deep -s - dist/WattbikeLogger.app || true
-            cp -R dist/WattbikeLogger.app out/pkg/
-          else
-            find dist -type d -name '*.app'
+          chmod +x scripts/macos/pkg/build_pkg.sh scripts/macos/pkg/scripts/postinstall
+          if [ ! -d dist/WattbikeLogger.app ]; then
+            find dist -type d -name '*.app' || true
             echo "WattbikeLogger.app missing" >&2
             exit 1
           fi
-          cp "scripts/macos/Install Wattbike Logger.command" out/pkg/
-          chmod +x "out/pkg/Install Wattbike Logger.command"
-          xattr -cr out/pkg/WattbikeLogger.app || true
-          (
-            cd out/pkg
-            zip -r -y "../../out/${{ matrix.artifact }}" WattbikeLogger.app "Install Wattbike Logger.command"
-          )
+          ./scripts/macos/pkg/build_pkg.sh \
+            "${{ steps.ver.outputs.version }}" \
+            "dist/WattbikeLogger.app" \
+            "out" \
+            "macos-arm64"
+          test -f "out/${{ matrix.artifact }}"
           ls -lh "out/${{ matrix.artifact }}"
 
-      - name: Package Linux zip
+      - name: Package Linux .deb
         if: runner.os == 'Linux'
         run: |
-          mkdir -p out/pkg
-          if [ -f dist/WattbikeLogger-linux-x64 ]; then
-            cp dist/WattbikeLogger-linux-x64 out/pkg/
-          elif [ -f dist/WattbikeLogger ]; then
-            cp dist/WattbikeLogger out/pkg/WattbikeLogger-linux-x64
-          else
-            find dist -type f
-            exit 1
-          fi
-          chmod +x out/pkg/WattbikeLogger-linux-x64
-          cp scripts/linux/install.sh out/pkg/
-          chmod +x out/pkg/install.sh
-          (
-            cd out/pkg
-            zip -r "../../out/${{ matrix.artifact }}" WattbikeLogger-linux-x64 install.sh
-          )
+          chmod +x scripts/linux/build_deb.sh
+          ./scripts/linux/build_deb.sh "${{ steps.ver.outputs.version }}"
+          test -f "out/${{ matrix.artifact }}"
           ls -lh "out/${{ matrix.artifact }}"
 
       - name: Upload artifact
@@ -145,8 +148,9 @@ jobs:
       - name: Flatten assets
         run: |
           mkdir -p dist
-          find release-assets -type f -name '*.zip' -exec cp {} dist/ \;
+          find release-assets -type f \( -name '*.pkg' -o -name '*.exe' -o -name '*.msi' -o -name '*.deb' \) -exec cp {} dist/ \;
           ls -lah dist
+          test "$(ls -A dist)"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2

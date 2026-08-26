@@ -1,0 +1,13 @@
+#!/bin/bash
+# postinstall — ripulisce quarantena e apre l'app
+set -euo pipefail
+APP="/Applications/WattbikeLogger.app"
+if [[ -d "$APP" ]]; then
+  xattr -cr "$APP" 2>/dev/null || true
+  chmod -R a+rX "$APP" || true
+  # Apri solo in installazioni interattive (non aggiornamenti silenziosi)
+  if [[ "${COMMAND_LINE_INSTALL:-}" != "1" ]]; then
+    open "$APP" || true
+  fi
+fi
+exit 0

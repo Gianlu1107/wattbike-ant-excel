@@ -1,12 +1,14 @@
 # Changelog
 
+## 1.3.3
+
+- Installer nativi (niente zip): macOS `.pkg` (Installer.app a step), Windows `Setup.exe` (Inno Setup), Linux `.deb`
+- Auto-update apre il nuovo installer invece di sostituire a mano il binario
+
 ## 1.3.2
 
 - Fix crash driver status (`accessible`)
-- Installer per OS: macOS `.app` + `Install Wattbike Logger.command` (niente Terminale / Gatekeeper)
-- Windows zip con script PowerShell; Linux zip con `install.sh`
-- GUI windowed senza console
-- Grafici con assi, griglia e scale utili (W / rpm / tempo)
+- GUI windowed senza console; grafici con assi/griglia/scale utili
 - Start disabilitato se nessuna chiavetta ANT+ è collegata
 
 ## 1.3.1
