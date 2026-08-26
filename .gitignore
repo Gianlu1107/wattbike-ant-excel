@@ -1,11 +1,29 @@
 .venv/
 __pycache__/
 *.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+*.spec.bak
+
+# Sessioni / export locali
 *.xlsx
 *.csv
 !sample_output/demo.xlsx
 !sample_output/demo.csv
+
+# OS / IDE
 .DS_Store
-dist/
-build/
-*.egg-info/
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# PyInstaller / update leftovers
+*.update.bat
+*.update.sh
+*.bak
+out/
+release-assets/

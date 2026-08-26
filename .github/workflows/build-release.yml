@@ -1,0 +1,125 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            exe_name: WattbikeLogger-windows-x64
+            artifact: WattbikeLogger-windows-x64.exe
+            libusb: windows
+          - os: macos-14
+            exe_name: WattbikeLogger-macos-arm64
+            artifact: WattbikeLogger-macos-arm64
+            libusb: macos
+          - os: macos-13
+            exe_name: WattbikeLogger-macos-x64
+            artifact: WattbikeLogger-macos-x64
+            libusb: macos
+          - os: ubuntu-22.04
+            exe_name: WattbikeLogger-linux-x64
+            artifact: WattbikeLogger-linux-x64
+            libusb: linux
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install libusb (macOS)
+        if: matrix.libusb == 'macos'
+        run: brew install libusb
+
+      - name: Install libusb (Linux)
+        if: matrix.libusb == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libusb-1.0-0 libusb-1.0-0-dev libudev-dev
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-build.txt
+
+      - name: Build executable
+        env:
+          WATTBIKE_EXE_NAME: ${{ matrix.exe_name }}
+        run: pyinstaller --noconfirm WattbikeLogger.spec
+
+      - name: Normalize artifact path (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          if (Test-Path "dist/${{ matrix.exe_name }}.exe") {
+            Copy-Item "dist/${{ matrix.exe_name }}.exe" "out/${{ matrix.artifact }}"
+          } elseif (Test-Path "dist/WattbikeLogger.exe") {
+            Copy-Item "dist/WattbikeLogger.exe" "out/${{ matrix.artifact }}"
+          } else {
+            Get-ChildItem -Recurse dist | Write-Output
+            throw "Executable not found"
+          }
+
+      - name: Normalize artifact path (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p out
+          if [ -f "dist/${{ matrix.exe_name }}" ]; then
+            cp "dist/${{ matrix.exe_name }}" "out/${{ matrix.artifact }}"
+          elif [ -f "dist/WattbikeLogger" ]; then
+            cp "dist/WattbikeLogger" "out/${{ matrix.artifact }}"
+          else
+            find dist -type f
+            echo "Executable not found" >&2
+            exit 1
+          fi
+          chmod +x "out/${{ matrix.artifact }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.exe_name }}
+          path: out/${{ matrix.artifact }}
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Flatten assets
+        run: |
+          mkdir -p dist
+          find release-assets -type f -exec cp {} dist/ \;
+          ls -la dist
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

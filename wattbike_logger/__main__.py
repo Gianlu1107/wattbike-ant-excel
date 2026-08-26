@@ -1,4 +1,4 @@
-"""CLI: scan / record / demo → Excel."""
+"""CLI / GUI: scan / record / demo / gui → Excel."""
 
 from __future__ import annotations
 
@@ -36,7 +36,6 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
 def cmd_record(args: argparse.Namespace) -> int:
     out = Path(args.output) if args.output else _default_output("wattbike")
-    # Per massima densità: in scan non dedupe (tiene anche ritrasmissioni ~0.25s).
     dedupe = args.unique_events
     recorder = SessionRecorder(
         device_id=args.device_id,
@@ -98,19 +97,45 @@ def cmd_demo(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_gui(_args: argparse.Namespace) -> int:
+    from .gui import run_gui
+
+    return run_gui()
+
+
+def cmd_setup_drivers(_args: argparse.Namespace) -> int:
+    from .drivers import diagnose, ensure_drivers
+
+    st = diagnose()
+    print(st.detail)
+    if st.ok or st.accessible:
+        return 0
+    if not st.can_auto_install:
+        return 1
+    st2 = ensure_drivers(on_status=print)
+    print(st2.detail)
+    return 0 if (st2.ok or st2.accessible) else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="wattbike-logger",
         description="Legge i dati ANT+ raw dalla Wattbike Pro/Trainer e li salva in Excel.",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command", required=False)
+
+    p_gui = sub.add_parser("gui", help="Interfaccia grafica (default)")
+    p_gui.set_defaults(func=cmd_gui)
+
+    p_drv = sub.add_parser("setup-drivers", help="Controlla/installa driver ANT+ per questo OS")
+    p_drv.set_defaults(func=cmd_setup_drivers)
 
     p_scan = sub.add_parser("scan", help="Cerca la Wattbike (PowerMeter ANT+)")
     p_scan.add_argument("--timeout", type=float, default=20.0, help="Secondi di scansione")
     p_scan.set_defaults(func=cmd_scan)
 
-    p_rec = sub.add_parser("record", help="Registra sessione live → Excel")
+    p_rec = sub.add_parser("record", help="Registra sessione live → Excel (CLI)")
     p_rec.add_argument(
         "--device-id",
         "-i",
@@ -130,7 +155,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--mode",
         choices=("scan", "paired"),
         default="scan",
-        help="scan=RX continuo al 100%% (default, più pacchetti); paired=canale classico (ne perde molti)",
+        help="scan=RX continuo al 100%% (default, più pacchetti); paired=canale classico",
     )
     p_rec.add_argument(
         "--unique-events",
@@ -153,8 +178,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv_list = list(sys.argv[1:] if argv is None else argv)
+    # Eseguibile frozen o nessun argomento → GUI
+    if getattr(sys, "frozen", False) or not argv_list:
+        from .gui import run_gui
+
+        return run_gui()
+
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv_list)
+    if not getattr(args, "command", None):
+        from .gui import run_gui
+
+        return run_gui()
     return args.func(args)
 
 

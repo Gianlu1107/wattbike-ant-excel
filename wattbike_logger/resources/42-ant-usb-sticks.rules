@@ -1,0 +1,13 @@
+# This file changes the permissions of Dynastream ANT USB sticks so all users
+# can read and write to them.
+#
+# Installed to /etc/udev/rules.d/42-ant-usb-sticks.rules
+
+ACTION!="add", GOTO="wattbike_ant_rules_end"
+SUBSYSTEM!="usb", GOTO="wattbike_ant_rules_end"
+
+ATTR{idVendor}=="0fcf", ATTR{idProduct}=="1008", ENV{ID_ANT_DEVICE}="1", TAG+="uaccess", GROUP="plugdev", MODE="0666"
+ATTR{idVendor}=="0fcf", ATTR{idProduct}=="1009", ENV{ID_ANT_DEVICE}="1", TAG+="uaccess", GROUP="plugdev", MODE="0666"
+ATTR{idVendor}=="0fcf", ATTR{idProduct}=="1004", ENV{ID_ANT_DEVICE}="1", TAG+="uaccess", GROUP="plugdev", MODE="0666"
+
+LABEL="wattbike_ant_rules_end"

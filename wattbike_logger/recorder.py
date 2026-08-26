@@ -20,9 +20,8 @@ logger = logging.getLogger(__name__)
 
 ReceiveMode = Literal["paired", "scan"]
 
-# ANT+ Bicycle Power channel period (~4.004 Hz → ~0.25 s). Alcuni sensori usano 4091 (~8 Hz).
+# ANT+ Bicycle Power channel period (~4.004 Hz → ~0.25 s)
 DEFAULT_POWER_PERIOD = 8182
-FAST_POWER_PERIOD = 4091
 
 # Profili trainer su 2457 MHz: solo quelli con potenza/cadenza utile
 INTERESTING_DEVICE_TYPES = {
@@ -445,7 +444,7 @@ class SessionRecorder:
             channel.on_acknowledge = on_data
 
             print(
-                "Registrazione RX-SCAN (solo watt, senza ritrasmissioni). "
+                "Registrazione RX-SCAN (solo pagine potenza). "
                 "Pedala. Ctrl+C per salvare."
                 + (f" (auto-stop {duration_s:.0f}s)" if duration_s else "")
             )
