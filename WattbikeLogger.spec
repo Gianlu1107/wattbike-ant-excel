@@ -1,10 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec — Wattbike ANT+ Logger (cross-platform)."""
+"""PyInstaller spec — Wattbike ANT+ Logger (lean, no matplotlib/numpy)."""
 
 import os
 import sys
 
-from PyInstaller.utils.hooks import collect_all, collect_submodules
+from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
 
@@ -14,24 +14,51 @@ hiddenimports = [
     "usb",
     "usb.backend.libusb1",
     "usb.backend.libusb0",
+    "usb.core",
+    "usb.util",
     "openant",
     "openant.base",
+    "openant.base.driver",
     "openant.easy",
+    "openant.easy.node",
+    "openant.easy.channel",
     "openant.devices",
-    "matplotlib",
-    "matplotlib.backends.backend_tkagg",
+    "openant.devices.common",
+    "openant.devices.power_meter",
+    "openant.devices.scanner",
 ]
 
-for pkg in ("openant", "usb", "matplotlib"):
-    try:
-        d, b, h = collect_all(pkg)
-        datas += d
-        binaries += b
-        hiddenimports += h
-    except Exception:
-        hiddenimports += collect_submodules(pkg)
+try:
+    hiddenimports += collect_submodules("openant")
+except Exception:
+    pass
 
-# Nome asset per piattaforma (sovrascrivibile da CI)
+# Esclude pacchetti pesanti / inutili in GUI
+excludes = [
+    "matplotlib",
+    "mpl_toolkits",
+    "numpy",
+    "pandas",
+    "PIL",
+    "Pillow",
+    "scipy",
+    "skimage",
+    "sklearn",
+    "torch",
+    "tensorflow",
+    "IPython",
+    "notebook",
+    "pytest",
+    "unittest",
+    "test",
+    "tests",
+    "tkinter.test",
+    "pydoc",
+    "doctest",
+    "xmlrpc",
+    "multiprocessing.dummy",
+]
+
 exe_name = os.environ.get("WATTBIKE_EXE_NAME", "WattbikeLogger")
 
 a = Analysis(
@@ -43,14 +70,21 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=excludes,
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
     noarchive=False,
 )
 
+# Rimuovi eventuali resti matplotlib/numpy se agganciati da hook
+a.binaries = [b for b in a.binaries if not any(x in b[0].lower() for x in ("matplotlib", "numpy", "pandas"))]
+a.datas = [d for d in a.datas if not any(x in str(d[0]).lower() for x in ("matplotlib", "numpy", "mpl-data"))]
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+# strip su Unix riduce un po' la size; su Windows spesso non disponibile
+do_strip = sys.platform != "win32"
 
 exe = EXE(
     pyz,
@@ -62,8 +96,8 @@ exe = EXE(
     name=exe_name,
     debug=False,
     bootloader_ignore_signals=False,
-    strip=False,
-    upx=False,
+    strip=do_strip,
+    upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,

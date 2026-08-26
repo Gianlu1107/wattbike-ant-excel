@@ -16,9 +16,30 @@ Dalla [pagina Releases](https://github.com/Gianlu1107/wattbike-ant-excel/release
 
 > macOS Intel: i runner GitHub `macos-13` non sono più disponibili; su Intel usa `pip install` + `python -m wattbike_logger`, oppure una macchina Apple Silicon.
 
-Su macOS/Linux: `chmod +x WattbikeLogger-*` poi avvia. All’avvio l’app verifica i driver ANT+ e cerca aggiornamenti.
+### Prima esecuzione
 
-Per pubblicare una release: `git tag v1.3.0 && git push origin v1.3.0` (GitHub Actions builda tutto).
+**macOS** — dopo il download, Gatekeeper blocca l’app (“sviluppatore non verificato” / *rejected*). Nel Terminale:
+
+```bash
+chmod +x ~/Downloads/WattbikeLogger-macos-arm64
+xattr -d com.apple.quarantine ~/Downloads/WattbikeLogger-macos-arm64
+open ~/Downloads/WattbikeLogger-macos-arm64
+```
+
+(Se il file è in un’altra cartella, cambia il percorso. In alternativa: clic destro → Apri → Apri.)
+
+**Linux**:
+
+```bash
+chmod +x ~/Downloads/WattbikeLogger-linux-x64
+~/Downloads/WattbikeLogger-linux-x64
+```
+
+**Windows**: esegui `WattbikeLogger-windows-x64.exe` (SmartScreen può chiedere “Altre info” → Esegui comunque).
+
+All’avvio l’app verifica i driver ANT+ e cerca aggiornamenti.
+
+Per pubblicare una release: `git tag v1.3.1 && git push origin v1.3.1` (GitHub Actions builda tutto).
 
 ## Requisiti (da sorgente)
 

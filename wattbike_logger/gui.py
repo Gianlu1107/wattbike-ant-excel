@@ -120,37 +120,49 @@ class WattbikeApp(tk.Tk):
         return lbl
 
     def _init_plots(self) -> None:
-        try:
-            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-            from matplotlib.figure import Figure
-        except ImportError:
-            ttk.Label(
-                self.plot_frame,
-                text="matplotlib non installato: grafici disabilitati",
-                style="Status.TLabel",
-            ).pack()
-            self.canvas = None
-            self.ax_power = None
-            self.ax_cad = None
-            return
+        wrap = ttk.Frame(self.plot_frame)
+        wrap.pack(fill=tk.BOTH, expand=True)
+        self.canvas_power = self._make_chart(wrap, "Potenza (W)", "#c0392b")
+        self.canvas_cad = self._make_chart(wrap, "Cadenza (rpm)", "#2980b9")
 
-        fig = Figure(figsize=(7.2, 3.2), dpi=100, facecolor="#f0f0f0")
-        self.ax_power = fig.add_subplot(211)
-        self.ax_cad = fig.add_subplot(212)
-        for ax, title, ylab in (
-            (self.ax_power, "Potenza", "W"),
-            (self.ax_cad, "Cadenza", "rpm"),
-        ):
-            ax.set_title(title, fontsize=9, loc="left")
-            ax.set_ylabel(ylab, fontsize=8)
-            ax.tick_params(labelsize=7)
-            ax.grid(True, alpha=0.3)
-            ax.set_facecolor("#ffffff")
-        self.ax_cad.set_xlabel("tempo (s)", fontsize=8)
-        fig.tight_layout(pad=1.2)
-        self.canvas = FigureCanvasTkAgg(fig, master=self.plot_frame)
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        self._fig = fig
+    def _make_chart(self, parent: ttk.Frame, title: str, color: str) -> tk.Canvas:
+        frame = ttk.Frame(parent)
+        frame.pack(fill=tk.BOTH, expand=True, pady=2)
+        ttk.Label(frame, text=title, style="MetricCap.TLabel").pack(anchor=tk.W)
+        canvas = tk.Canvas(frame, height=120, bg="#ffffff", highlightthickness=1, highlightbackground="#cccccc")
+        canvas.pack(fill=tk.BOTH, expand=True)
+        canvas._line_color = color  # type: ignore[attr-defined]
+        canvas.bind("<Configure>", lambda _e: self._redraw_plots())
+        return canvas
+
+    def _draw_series(self, canvas: tk.Canvas, series: deque[tuple[float, float]]) -> None:
+        canvas.delete("all")
+        w = max(canvas.winfo_width(), 10)
+        h = max(canvas.winfo_height(), 10)
+        pad = 8
+        if len(series) < 2:
+            canvas.create_text(w // 2, h // 2, text="—", fill="#999999", font=_UI_FONT_SMALL)
+            return
+        xs = [p[0] for p in series]
+        ys = [p[1] for p in series]
+        xmin, xmax = min(xs), max(xs)
+        ymin, ymax = min(ys), max(ys)
+        if xmax <= xmin:
+            xmax = xmin + 1.0
+        if ymax <= ymin:
+            ymax = ymin + 1.0
+        # padding verticale
+        span = ymax - ymin
+        ymin -= span * 0.05
+        ymax += span * 0.05
+        pts: list[float] = []
+        for x, y in series:
+            px = pad + (x - xmin) / (xmax - xmin) * (w - 2 * pad)
+            py = h - pad - (y - ymin) / (ymax - ymin) * (h - 2 * pad)
+            pts.extend([px, py])
+        color = getattr(canvas, "_line_color", "#333333")
+        canvas.create_line(*pts, fill=color, width=2, smooth=True)
+        canvas.create_text(pad + 2, pad, anchor=tk.NW, text=f"{ys[-1]:.0f}", fill=color, font=_UI_FONT_SMALL)
 
     def _set_status(self, text: str) -> None:
         self.lbl_status.configure(text=text)
@@ -193,26 +205,10 @@ class WattbikeApp(tk.Tk):
             self._redraw_plots()
 
     def _redraw_plots(self) -> None:
-        if not self.canvas or not self.ax_power or not self.ax_cad:
-            return
-        self.ax_power.clear()
-        self.ax_cad.clear()
-        self.ax_power.set_title("Potenza", fontsize=9, loc="left")
-        self.ax_cad.set_title("Cadenza", fontsize=9, loc="left")
-        self.ax_power.set_ylabel("W", fontsize=8)
-        self.ax_cad.set_ylabel("rpm", fontsize=8)
-        self.ax_cad.set_xlabel("tempo (s)", fontsize=8)
-        if self._power_hist:
-            xs, ys = zip(*self._power_hist)
-            self.ax_power.plot(xs, ys, color="#c0392b", linewidth=1.2)
-        if self._cad_hist:
-            xs, ys = zip(*self._cad_hist)
-            self.ax_cad.plot(xs, ys, color="#2980b9", linewidth=1.2)
-        for ax in (self.ax_power, self.ax_cad):
-            ax.grid(True, alpha=0.3)
-            ax.tick_params(labelsize=7)
-        self._fig.tight_layout(pad=1.2)
-        self.canvas.draw_idle()
+        if getattr(self, "canvas_power", None) is not None:
+            self._draw_series(self.canvas_power, self._power_hist)
+        if getattr(self, "canvas_cad", None) is not None:
+            self._draw_series(self.canvas_cad, self._cad_hist)
 
     def _on_start(self) -> None:
         if self._recording or self._countdown_job:
