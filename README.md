@@ -37,7 +37,7 @@ Dalla [pagina Releases](https://github.com/Gianlu1107/wattbike-ant-excel/release
 >
 > La rimozione completa di questo avviso richiede un account **Apple Developer** (firma + notarizzazione). Se lo attivi, si può configurare in CI.
 
-**Windows** — esegui `WattbikeLogger-windows-x64-Setup.exe` e segui il wizard (cartella, scorciatoie, Avvia). SmartScreen: Altre info → Esegui comunque.
+**Windows** — esegui `WattbikeLogger-windows-x64-Setup.exe` e segui il wizard. Lascia spuntata **«Configura subito i driver ANT+»** (chiederà UAC una volta). SmartScreen: Altre info → Esegui comunque.
 
 **Linux (Debian/Ubuntu)** — doppio click sul `.deb` oppure:
 
@@ -46,9 +46,18 @@ sudo apt install ./WattbikeLogger-linux-x64.deb
 # oppure: sudo dpkg -i WattbikeLogger-linux-x64.deb
 ```
 
-All’avvio l’app verifica i driver ANT+ e cerca aggiornamenti.
+Le regole udev ANT+ vengono installate col pacchetto (eventualmente esci/rientra dalla sessione per il gruppo `plugdev`).
 
-Per pubblicare una release: `git tag v1.3.5 && git push origin v1.3.5` (GitHub Actions crea pkg / Setup.exe / deb + zip app).
+### Plug-and-play
+
+1. Installa l’app  
+2. Collega la chiavetta USB ANT+  
+3. L’app la rileva e abilita **Start** (all’avvio prepara i driver da sola; su Windows può chiedere admin **una volta**)  
+4. Premi Start → countdown → pedala  
+
+Se qualcosa resta bloccato: pulsante **Driver** in alto a destra.
+
+Per pubblicare una release: `git tag v1.4.0 && git push origin v1.4.0` (GitHub Actions crea pkg / Setup.exe / deb + zip app).
 
 ## Requisiti (da sorgente)
 
@@ -67,15 +76,20 @@ pip install -r requirements.txt
 
 ## Driver ANT+
 
-All’avvio (GUI) o con `python -m wattbike_logger setup-drivers`:
+Plug-and-play all’avvio GUI, oppure:
+
+```bash
+python -m wattbike_logger setup-drivers
+# exe Windows: WattbikeLogger.exe setup-drivers
+```
 
 | OS | Automatico |
 |----|------------|
-| Windows | Filtro **libusb-win32** (UAC); fallback Zadig |
-| Linux | Regole **udev** (`pkexec` / `sudo`) |
-| macOS | Verifica **libusb** (`brew` se manca); l’exe ufficiale la include |
+| Windows | Filtro **libusb-win32** per tutti i PID ANT (un solo UAC); fallback Zadig |
+| Linux | Regole **udev** nel `.deb` + reload; altrimenti `pkexec`/`sudo` dall’app |
+| macOS | **libusb** nel bundle `.app`; da sorgente `brew install libusb` |
 
-Manuale se serve: [Zadig](https://zadig.akeo.ie/) → stick ANT → **libusb-win32**. Chiudi Zwift/TrainerRoad durante la registrazione.
+Manuale se serve: [Zadig](https://zadig.akeo.ie/) → Options → List All Devices → stick ANT → **libusb-win32**. Chiudi Zwift/TrainerRoad durante la registrazione.
 
 ## Uso GUI
 
@@ -139,7 +153,7 @@ Installer locali:
 ./scripts/linux/build_deb.sh
 
 # Windows (con Inno Setup 6 installato) → out/WattbikeLogger-windows-x64-Setup.exe
-iscc /DMyAppVersion=1.3.5 /DSourceExe=dist\WattbikeLogger-windows-x64.exe /DOutputDir=%cd%\out scripts\windows\WattbikeLogger.iss
+iscc /DMyAppVersion=1.4.0 /DSourceExe=dist\WattbikeLogger-windows-x64.exe /DOutputDir=%cd%\out scripts\windows\WattbikeLogger.iss
 ```
 
 Vedi [CHANGELOG.md](CHANGELOG.md).

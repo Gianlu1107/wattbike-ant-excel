@@ -103,18 +103,22 @@ def cmd_gui(_args: argparse.Namespace) -> int:
     return run_gui()
 
 
-def cmd_setup_drivers(_args: argparse.Namespace) -> int:
-    from .drivers import diagnose, ensure_drivers
+def cmd_setup_drivers(args: argparse.Namespace) -> int:
+    from .drivers import diagnose, ensure_drivers, prepare_plug_and_play
 
-    st = diagnose()
-    print(st.detail)
-    if st.ok or st.accessible:
+    quiet = bool(getattr(args, "quiet", False))
+
+    def log(msg: str) -> None:
+        if not quiet:
+            print(msg)
+
+    st = prepare_plug_and_play(on_status=log)
+    log(st.detail)
+    if st.ok or st.backend_ready or st.accessible:
         return 0
-    if not st.can_auto_install:
-        return 1
-    st2 = ensure_drivers(on_status=print)
-    print(st2.detail)
-    return 0 if (st2.ok or st2.accessible) else 1
+    st2 = ensure_drivers(on_status=log)
+    log(st2.detail)
+    return 0 if (st2.ok or st2.backend_ready or st2.accessible) else 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -129,8 +133,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_gui.set_defaults(func=cmd_gui)
 
     p_drv = sub.add_parser("setup-drivers", help="Controlla/installa driver ANT+ per questo OS")
+    p_drv.add_argument("--quiet", action="store_true", help="Meno output")
     p_drv.set_defaults(func=cmd_setup_drivers)
-
     p_scan = sub.add_parser("scan", help="Cerca la Wattbike (PowerMeter ANT+)")
     p_scan.add_argument("--timeout", type=float, default=20.0, help="Secondi di scansione")
     p_scan.set_defaults(func=cmd_scan)
@@ -179,12 +183,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     argv_list = list(sys.argv[1:] if argv is None else argv)
-    # Eseguibile frozen o nessun argomento → GUI
-    if getattr(sys, "frozen", False) or not argv_list:
+    # Nessun argomento → GUI (anche se frozen)
+    if not argv_list:
         from .gui import run_gui
 
         return run_gui()
 
+    # Frozen: permetti setup-drivers / scan / … da riga di comando
     parser = build_parser()
     args = parser.parse_args(argv_list)
     if not getattr(args, "command", None):

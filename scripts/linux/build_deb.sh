@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Crea un .deb installabile (doppio click / apt / Software Install)
+# Include regole udev ANT+ nel postinst per plug-and-play.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -32,9 +33,15 @@ PKG_ROOT="$WORKDIR/${PKG_NAME}_${VERSION}_${ARCH_DEB}"
 mkdir -p "$PKG_ROOT/DEBIAN" \
   "$PKG_ROOT/usr/local/bin" \
   "$PKG_ROOT/usr/share/applications" \
-  "$PKG_ROOT/usr/share/doc/$PKG_NAME"
+  "$PKG_ROOT/usr/share/doc/$PKG_NAME" \
+  "$PKG_ROOT/lib/udev/rules.d" \
+  "$PKG_ROOT/usr/share/wattbike-logger"
 
 install -m 755 "$BIN_SRC" "$PKG_ROOT/usr/local/bin/WattbikeLogger"
+install -m 644 "$ROOT/wattbike_logger/resources/42-ant-usb-sticks.rules" \
+  "$PKG_ROOT/lib/udev/rules.d/42-ant-usb-sticks.rules"
+cp "$ROOT/wattbike_logger/resources/42-ant-usb-sticks.rules" \
+  "$PKG_ROOT/usr/share/wattbike-logger/42-ant-usb-sticks.rules"
 cp "$ROOT/LICENSE" "$PKG_ROOT/usr/share/doc/$PKG_NAME/copyright"
 cat > "$PKG_ROOT/usr/share/doc/$PKG_NAME/changelog.Debian" <<EOF
 $PKG_NAME ($VERSION) unstable; urgency=low
@@ -56,7 +63,7 @@ Terminal=false
 Categories=Utility;Sports;
 EOF
 
-INSTALLED_SIZE="$(du -sk "$PKG_ROOT/usr" | awk '{print $1}')"
+INSTALLED_SIZE="$(du -sk "$PKG_ROOT/usr" "$PKG_ROOT/lib" 2>/dev/null | awk '{s+=$1} END{print s}')"
 cat > "$PKG_ROOT/DEBIAN/control" <<EOF
 Package: $PKG_NAME
 Version: $VERSION
@@ -68,17 +75,33 @@ Maintainer: Gianluca <noreply@users.noreply.github.com>
 Depends: libusb-1.0-0
 Description: Wattbike ANT+ Logger → Excel/CSV
  Desktop app to log Wattbike ANT+ Bicycle Power data to Excel/CSV.
+ Includes udev rules for ANT USB sticks (VID 0fcf).
 EOF
 
-# postinst: udev rules hint (optional copy)
 cat > "$PKG_ROOT/DEBIAN/postinst" <<'EOF'
 #!/bin/sh
 set -e
-RULES_SRC="/usr/local/share/wattbike-logger/42-ant-usb-sticks.rules"
-# binary-only package: rules shipped next to app resources are inside the frozen binary
+if command -v udevadm >/dev/null 2>&1; then
+  udevadm control --reload-rules || true
+  udevadm trigger --subsystem-match=usb --attr-match=idVendor=0fcf --action=add || true
+fi
+# Aggiungi utente al gruppo plugdev se esiste
+if getent group plugdev >/dev/null 2>&1; then
+  u="${SUDO_USER:-}"
+  if [ -n "$u" ] && [ "$u" != "root" ]; then
+    usermod -aG plugdev "$u" 2>/dev/null || true
+  fi
+fi
 exit 0
 EOF
 chmod 755 "$PKG_ROOT/DEBIAN/postinst"
+
+cat > "$PKG_ROOT/DEBIAN/prerm" <<'EOF'
+#!/bin/sh
+set -e
+exit 0
+EOF
+chmod 755 "$PKG_ROOT/DEBIAN/prerm"
 
 mkdir -p "$OUT_DIR"
 OUT_DEB="$OUT_DIR/WattbikeLogger-linux-x64.deb"

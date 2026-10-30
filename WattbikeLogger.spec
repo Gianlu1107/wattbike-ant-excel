@@ -10,6 +10,36 @@ block_cipher = None
 
 datas = [("wattbike_logger/resources", "wattbike_logger/resources")]
 binaries = []
+
+# macOS/Linux: includi libusb se presente sul runner di build (plug-and-play)
+def _find_libusb_bins():
+    found = []
+    if sys.platform == "darwin":
+        for p in (
+            "/opt/homebrew/lib/libusb-1.0.0.dylib",
+            "/opt/homebrew/lib/libusb-1.0.dylib",
+            "/usr/local/lib/libusb-1.0.0.dylib",
+            "/usr/local/lib/libusb-1.0.dylib",
+        ):
+            if os.path.isfile(p):
+                found.append((p, "."))
+                break
+    elif sys.platform.startswith("linux"):
+        for p in (
+            "/usr/lib/x86_64-linux-gnu/libusb-1.0.so.0",
+            "/lib/x86_64-linux-gnu/libusb-1.0.so.0",
+            "/usr/lib/libusb-1.0.so.0",
+        ):
+            if os.path.isfile(p):
+                found.append((p, "."))
+                break
+    return found
+
+try:
+    binaries += _find_libusb_bins()
+except Exception:
+    pass
+
 hiddenimports = [
     "usb",
     "usb.backend.libusb1",
@@ -121,8 +151,8 @@ if is_macos:
         info_plist={
             "CFBundleName": "Wattbike Logger",
             "CFBundleDisplayName": "Wattbike Logger",
-            "CFBundleShortVersionString": "1.3.5",
-            "CFBundleVersion": "1.3.5",
+            "CFBundleShortVersionString": "1.4.0",
+            "CFBundleVersion": "1.4.0",
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "12.0",
             "NSAppleEventsUsageDescription": "Wattbike Logger",

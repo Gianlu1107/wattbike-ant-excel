@@ -58,14 +58,16 @@ class WattbikeApp(tk.Tk):
         self._t0: float | None = None
         self._stick_ready = False
         self._busy = False  # countdown / driver install / update
+        self._driver_fix_attempted = False
+        self._last_stick_present = False
 
         self._build_style()
         self._build_ui()
         self._init_plots()
         self.after(100, self._poll_queues)
-        self.after(200, self._check_drivers_async)
-        self.after(2500, self._poll_stick_presence)
-        self.after(800, self._check_updates_async)
+        self.after(150, self._bootstrap_drivers_async)
+        self.after(1000, self._poll_stick_presence)
+        self.after(2500, self._check_updates_async)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _build_style(self) -> None:
@@ -102,8 +104,10 @@ class WattbikeApp(tk.Tk):
             bar, text="Stop", style="Stop.TButton", command=self._on_stop, state=tk.DISABLED
         )
         self.btn_stop.pack(side=tk.LEFT)
-        self.lbl_status = ttk.Label(bar, text="Ricerca chiavetta ANT…", style="Status.TLabel")
+        self.lbl_status = ttk.Label(bar, text="Preparazione driver ANT…", style="Status.TLabel")
         self.lbl_status.pack(side=tk.LEFT, padx=16)
+        self.btn_drivers = ttk.Button(bar, text="Driver", command=self._on_repair_drivers)
+        self.btn_drivers.pack(side=tk.RIGHT)
 
         opts = ttk.Frame(self, padding=(10, 6))
         opts.pack(fill=tk.X)
@@ -363,24 +367,32 @@ class WattbikeApp(tk.Tk):
         if not self._stick_ready:
             messagebox.showwarning(
                 "Chiavetta ANT+",
-                "Nessuna chiavetta ANT+ collegata.\n"
-                "Inserisci la stick USB e riprova.",
+                "Nessuna chiavetta ANT+ collegata o non ancora pronta.\n"
+                "Inserisci la stick USB, attendi lo stato «pronta», poi riprova.\n"
+                "Se resta bloccata: pulsante Driver.",
             )
-            self._check_drivers_async()
+            self._bootstrap_drivers_async()
             return
 
         # Verifica immediata prima del countdown
-        from .drivers import diagnose
+        from .drivers import diagnose, open_zadig_fallback
 
         st = diagnose()
-        self._stick_ready = bool(st.stick_present)
-        if not self._stick_ready:
+        self._apply_driver_status(st, announce=False)
+        if not st.stick_present:
             self._set_status(st.detail)
-            self._update_start_enabled()
             messagebox.showwarning(
                 "Chiavetta ANT+",
                 "Nessuna chiavetta ANT+ rilevata.\n"
                 "Collegala e riprova.",
+            )
+            return
+        if not (st.ok or st.accessible):
+            self._run_driver_repair(open_zadig_fallback, silent=True)
+            messagebox.showinfo(
+                "Chiavetta ANT+",
+                "Sto configurando i driver per la chiavetta.\n"
+                "Conferma l'eventuale richiesta admin, poi riprova Start.",
             )
             return
 
@@ -557,79 +569,105 @@ class WattbikeApp(tk.Tk):
             messagebox.showerror("Salvataggio", f"Errore scrittura file:\n{exc}")
             self._set_status("Errore salvataggio")
 
-    def _check_drivers_async(self) -> None:
+    def _apply_driver_status(self, st: Any, *, announce: bool = True) -> None:
+        present = bool(st.stick_present)
+        accessible = bool(getattr(st, "stick_accessible", False) or st.accessible)
+        # Start solo quando la chiavetta è presente E apribile da openant
+        self._stick_ready = present and accessible
+        self._update_start_enabled()
+        if announce and not self._recording and not self._countdown_job:
+            self._set_status(st.detail)
+
+    def _bootstrap_drivers_async(self) -> None:
+        """All'avvio: prepara driver in automatico (plug-and-play), senza dialoghi."""
+
         def worker() -> None:
-            from .drivers import diagnose, ensure_drivers, open_zadig_fallback
+            from .drivers import open_zadig_fallback, prepare_plug_and_play
 
-            st = diagnose()
-            self.after(0, lambda: self._handle_driver_status(st, ensure_drivers, open_zadig_fallback))
+            self._status_queue.put("Preparazione driver ANT+…")
+            st = prepare_plug_and_play(on_status=lambda s: self._status_queue.put(s))
+            self.after(0, lambda: self._after_bootstrap(st, open_zadig_fallback))
 
-        threading.Thread(target=worker, daemon=True, name="driver-check").start()
+        threading.Thread(target=worker, daemon=True, name="driver-bootstrap").start()
+
+    def _after_bootstrap(self, st: Any, open_zadig_fallback: Any) -> None:
+        self._apply_driver_status(st)
+        # Se stick già collegata ma non accessibile → ripara subito una volta
+        if st.stick_present and not (st.ok or st.accessible) and st.can_auto_install:
+            self._run_driver_repair(open_zadig_fallback, silent=True)
+            return
+        if st.stick_present and (st.ok or st.accessible):
+            self._set_status("Chiavetta ANT pronta — puoi premere Start.")
+
+    def _on_repair_drivers(self) -> None:
+        from .drivers import open_zadig_fallback
+
+        self._run_driver_repair(open_zadig_fallback, silent=False)
+
+    def _run_driver_repair(self, open_zadig_fallback: Any, *, silent: bool) -> None:
+        if self._busy or self._recording:
+            return
+        self._busy = True
+        self._driver_fix_attempted = True
+        self._update_start_enabled()
+        self._set_status("Installazione / riparazione driver…")
+
+        def worker() -> None:
+            from .drivers import ensure_drivers
+
+            result = ensure_drivers(on_status=lambda s: self._status_queue.put(s))
+            self.after(0, lambda: self._after_driver_install(result, open_zadig_fallback, silent=silent))
+
+        threading.Thread(target=worker, daemon=True, name="driver-repair").start()
 
     def _poll_stick_presence(self) -> None:
-        """Controlla periodicamente se la chiavetta è stata collegata/scollegata."""
+        """Hotplug: rileva collegamento/scollegamento chiavetta ogni secondo."""
         if not self._recording and not self._countdown_job and not self._busy:
 
             def worker() -> None:
-                from .drivers import diagnose
+                from .drivers import diagnose, open_zadig_fallback
 
                 st = diagnose()
-                ready = bool(st.stick_present)
-                detail = st.detail
 
                 def apply() -> None:
-                    prev = self._stick_ready
-                    self._stick_ready = ready
-                    self._update_start_enabled()
-                    if not self._recording and not self._countdown_job:
-                        if ready and not prev:
-                            self._set_status(detail or "Chiavetta ANT rilevata")
-                        elif not ready:
-                            self._set_status(detail or "Nessuna chiavetta ANT collegata.")
+                    was_present = self._last_stick_present
+                    self._last_stick_present = bool(st.stick_present)
+                    self._apply_driver_status(st)
+                    # Appena collegata e non accessibile → ripara in automatico
+                    if (
+                        st.stick_present
+                        and not was_present
+                        and not (st.ok or st.accessible)
+                        and st.can_auto_install
+                    ):
+                        self._run_driver_repair(open_zadig_fallback, silent=True)
 
                 self.after(0, apply)
 
             threading.Thread(target=worker, daemon=True, name="stick-poll").start()
-        self.after(2500, self._poll_stick_presence)
+        self.after(1000, self._poll_stick_presence)
 
-    def _handle_driver_status(self, st: Any, ensure_drivers: Any, open_zadig_fallback: Any) -> None:
-        self._stick_ready = bool(st.stick_present)
-        self._set_status(st.detail)
-        self._update_start_enabled()
-        if st.ok or st.accessible:
-            return
-        # Solo avviso soft se manca la stick (Start resta disabilitato)
-        if not st.stick_present and not st.can_auto_install:
-            return
-        if not st.stick_present:
-            return
-        if not st.can_auto_install:
-            messagebox.showwarning("Chiavetta ANT+", st.detail)
-            return
-        if not messagebox.askyesno(
-            "Setup driver ANT+",
-            f"{st.detail}\n\nVuoi che provo ad installare automaticamente "
-            f"quanto serve su questo sistema?",
-        ):
-            return
-
-        self._busy = True
-        self._update_start_enabled()
-        self._set_status("Installazione driver…")
-
-        def worker() -> None:
-            result = ensure_drivers(on_status=lambda s: self._status_queue.put(s))
-            self.after(0, lambda: self._after_driver_install(result, open_zadig_fallback))
-
-        threading.Thread(target=worker, daemon=True, name="driver-install").start()
-
-    def _after_driver_install(self, result: Any, open_zadig_fallback: Any) -> None:
+    def _after_driver_install(
+        self, result: Any, open_zadig_fallback: Any, *, silent: bool = False
+    ) -> None:
         self._busy = False
-        self._stick_ready = bool(getattr(result, "stick_present", False) or result.ok or result.accessible)
-        self._update_start_enabled()
+        self._apply_driver_status(result)
+        if result.stick_present and (result.ok or result.accessible):
+            self._set_status("Chiavetta ANT pronta — puoi premere Start.")
+            if not silent:
+                messagebox.showinfo("Driver", "Setup completato.\n" + result.detail)
+            return
+        if result.backend_ready and not result.stick_present:
+            self._set_status("Driver pronti. Collega la chiavetta USB ANT+.")
+            if not silent:
+                messagebox.showinfo(
+                    "Driver",
+                    "Driver ANT+ configurati.\nCollega ora la chiavetta USB e attendi un attimo.",
+                )
+            return
+        # Fallimento
         self._set_status(result.detail)
-        if result.ok or result.accessible:
-            messagebox.showinfo("Driver", "Setup completato.\n" + result.detail)
+        if silent:
             return
         if sys.platform.startswith("win"):
             if messagebox.askyesno(

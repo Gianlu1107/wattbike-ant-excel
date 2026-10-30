@@ -7,8 +7,11 @@ import sys
 
 
 def _silence_console_when_frozen() -> None:
-    """Evita output residuo se l'exe windowed viene lanciato da Terminale."""
+    """Evita output residuo se l'exe windowed viene lanciato da Terminale (solo GUI)."""
     if not getattr(sys, "frozen", False):
+        return
+    # Lascia stdout per comandi CLI tipo setup-drivers
+    if any(a in ("setup-drivers", "scan", "record", "demo", "--help", "-h") for a in sys.argv[1:]):
         return
     try:
         devnull = open(os.devnull, "w", encoding="utf-8")

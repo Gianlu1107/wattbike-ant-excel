@@ -3,7 +3,7 @@
 ; Variabili da CI: MyAppVersion, SourceExe, OutputDir
 
 #ifndef MyAppVersion
-  #define MyAppVersion "1.3.5"
+  #define MyAppVersion "1.4.0"
 #endif
 #ifndef SourceExe
   #define SourceExe "..\..\dist\WattbikeLogger-windows-x64.exe"
@@ -31,6 +31,7 @@ SetupIconFile=
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+; lowest: installazione senza admin; i driver chiedono UAC al primo avvio / setup-drivers
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -43,6 +44,7 @@ DisableWelcomePage=no
 WizardSizePercent=120
 CloseApplications=yes
 RestartApplications=no
+InfoAfterFile=
 
 [Languages]
 Name: "italian"; MessagesFile: "compiler:Languages\Italian.isl"
@@ -50,6 +52,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "antdrivers"; Description: "Configura subito i driver della chiavetta ANT+ (consigliato)"; GroupDescription: "Hardware:"; Flags: checkedonce
 
 [Files]
 Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "WattbikeLogger.exe"; Flags: ignoreversion
@@ -60,6 +63,8 @@ Name: "{group}\{cm:UninstallProgram,Wattbike Logger}"; Filename: "{uninstallexe}
 Name: "{autodesktop}\Wattbike Logger"; Filename: "{app}\WattbikeLogger.exe"; Tasks: desktopicon
 
 [Run]
+; Prepara libusb-win32 (può mostrare UAC). Poi avvia l'app.
+Filename: "{app}\WattbikeLogger.exe"; Parameters: "setup-drivers --quiet"; StatusMsg: "Configurazione driver ANT+…"; Flags: postinstall waituntilterminated; Tasks: antdrivers
 Filename: "{app}\WattbikeLogger.exe"; Description: "Avvia Wattbike Logger"; Flags: nowait postinstall skipifsilent
 
 [Code]

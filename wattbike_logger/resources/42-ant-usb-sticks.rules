@@ -1,5 +1,4 @@
-# This file changes the permissions of Dynastream ANT USB sticks so all users
-# can read and write to them.
+# Wattbike Logger — permessi chiavette ANT+ Dynastream/Garmin (VID 0fcf)
 #
 # Installed to /etc/udev/rules.d/42-ant-usb-sticks.rules
 
@@ -9,5 +8,10 @@ SUBSYSTEM!="usb", GOTO="wattbike_ant_rules_end"
 ATTR{idVendor}=="0fcf", ATTR{idProduct}=="1008", ENV{ID_ANT_DEVICE}="1", TAG+="uaccess", GROUP="plugdev", MODE="0666"
 ATTR{idVendor}=="0fcf", ATTR{idProduct}=="1009", ENV{ID_ANT_DEVICE}="1", TAG+="uaccess", GROUP="plugdev", MODE="0666"
 ATTR{idVendor}=="0fcf", ATTR{idProduct}=="1004", ENV{ID_ANT_DEVICE}="1", TAG+="uaccess", GROUP="plugdev", MODE="0666"
+ATTR{idVendor}=="0fcf", ATTR{idProduct}=="1003", ENV{ID_ANT_DEVICE}="1", TAG+="uaccess", GROUP="plugdev", MODE="0666"
+ATTR{idVendor}=="0fcf", ATTR{idProduct}=="1005", ENV{ID_ANT_DEVICE}="1", TAG+="uaccess", GROUP="plugdev", MODE="0666"
+ATTR{idVendor}=="0fcf", ATTR{idProduct}=="1006", ENV{ID_ANT_DEVICE}="1", TAG+="uaccess", GROUP="plugdev", MODE="0666"
+# Catch-all altri prodotti ANT dello stesso vendor
+ATTR{idVendor}=="0fcf", ENV{ID_ANT_DEVICE}="1", TAG+="uaccess", GROUP="plugdev", MODE="0666"
 
 LABEL="wattbike_ant_rules_end"
