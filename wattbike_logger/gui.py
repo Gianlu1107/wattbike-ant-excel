@@ -112,10 +112,15 @@ class WattbikeApp(tk.Tk):
         opts = ttk.Frame(self, padding=(10, 6))
         opts.pack(fill=tk.X)
         ttk.Label(opts, text="Device ID:").pack(side=tk.LEFT)
-        self.var_device = tk.StringVar(value="54434")
+        from .prefs import get_device_id_pref
+
+        # 0 = universale (qualsiasi PowerMeter ANT+); ultimo usato se salvato
+        self.var_device = tk.StringVar(value=str(get_device_id_pref(0)))
         self.ent_device = ttk.Entry(opts, textvariable=self.var_device, width=10)
         self.ent_device.pack(side=tk.LEFT, padx=6)
-        ttk.Label(opts, text="(0 = qualsiasi)").pack(side=tk.LEFT)
+        ttk.Label(opts, text="(0 = auto / qualsiasi)").pack(side=tk.LEFT)
+        self.lbl_detected = ttk.Label(opts, text="", style="Status.TLabel")
+        self.lbl_detected.pack(side=tk.LEFT, padx=12)
 
         self.lbl_countdown = ttk.Label(self, text="", style="Big.TLabel", anchor=tk.CENTER)
         self.lbl_countdown.pack(fill=tk.X, pady=8)
@@ -399,8 +404,16 @@ class WattbikeApp(tk.Tk):
         try:
             device_id = int(self.var_device.get().strip() or "0")
         except ValueError:
-            messagebox.showerror("Device ID", "Inserisci un numero valido (es. 54434).")
+            messagebox.showerror(
+                "Device ID",
+                "Inserisci un numero valido, oppure 0 per rilevare automaticamente "
+                "qualsiasi PowerMeter ANT+.",
+            )
             return
+
+        from .prefs import set_device_id_pref
+
+        set_device_id_pref(device_id)
 
         self.btn_start.configure(state=tk.DISABLED)
         self.ent_device.configure(state=tk.DISABLED)
@@ -415,14 +428,19 @@ class WattbikeApp(tk.Tk):
         self.lbl_elapsed.configure(text="00:00")
         self.lbl_avg.configure(text="—")
         self.lbl_packets.configure(text="0")
+        self.lbl_detected.configure(text="")
         self.lbl_countdown.configure(text="3")
         self._set_status("Countdown… preparazione chiavetta")
+
+        def on_device(dev_id: int, type_name: str) -> None:
+            self.after(0, lambda: self._on_device_found(dev_id, type_name))
 
         self._session = LiveSession(
             device_id=device_id,
             mode="scan",
             on_row=lambda r: self._row_queue.put(r),
             on_status=lambda s: self._status_queue.put(s),
+            on_device=on_device,
         )
 
         def prep() -> None:
@@ -569,6 +587,12 @@ class WattbikeApp(tk.Tk):
             messagebox.showerror("Salvataggio", f"Errore scrittura file:\n{exc}")
             self._set_status("Errore salvataggio")
 
+    def _on_device_found(self, device_id: int, type_name: str) -> None:
+        self.lbl_detected.configure(text=f"Rilevato: {device_id} ({type_name})")
+        # Se eravamo in auto (0), mostra l'ID trovato senza forzare il filtro
+        if (self.var_device.get() or "0").strip() == "0":
+            self._set_status(f"PowerMeter {device_id} in ascolto (auto)")
+
     def _apply_driver_status(self, st: Any, *, announce: bool = True) -> None:
         present = bool(st.stick_present)
         accessible = bool(getattr(st, "stick_accessible", False) or st.accessible)
@@ -576,7 +600,18 @@ class WattbikeApp(tk.Tk):
         self._stick_ready = present and accessible
         self._update_start_enabled()
         if announce and not self._recording and not self._countdown_job:
-            self._set_status(st.detail)
+            detail = st.detail
+            if present:
+                try:
+                    from .drivers import list_ant_sticks
+
+                    sticks = list_ant_sticks()
+                    if sticks:
+                        pids = ", ".join(f"{pid:04X}" for _, pid in sticks)
+                        detail = f"{detail}  [USB PID {pids}]"
+                except Exception:
+                    pass
+            self._set_status(detail)
 
     def _bootstrap_drivers_async(self) -> None:
         """All'avvio: prepara driver in automatico (plug-and-play), senza dialoghi."""

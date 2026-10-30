@@ -35,11 +35,13 @@ class LiveSession:
         mode: str = "scan",
         on_row: Callable[[dict[str, Any]], None] | None = None,
         on_status: Callable[[str], None] | None = None,
+        on_device: Callable[[int, str], None] | None = None,
     ):
-        self.device_id = device_id
+        self.device_id = device_id  # 0 = qualsiasi PowerMeter
         self.mode = mode
         self.on_row = on_row
         self.on_status = on_status
+        self.on_device = on_device
         self.rows: list[dict[str, Any]] = []
         self.found_device_id: int | None = None
         self.capturing = False
@@ -52,6 +54,12 @@ class LiveSession:
         self._use_paired = mode == "paired"
         self._meter: PowerMeter | None = None
         self._error: str | None = None
+
+    def _notify_device(self, device_id: int, device_type: int | None) -> None:
+        if self.found_device_id is None:
+            self.found_device_id = device_id
+            if self.on_device:
+                self.on_device(device_id, _device_type_name(device_type))
 
     def _status(self, msg: str) -> None:
         if self.on_status:
@@ -125,8 +133,7 @@ class LiveSession:
                 self._status(
                     f"Segnale: device_id={device_id} ({_device_type_name(device_type)})"
                 )
-            if self.found_device_id is None:
-                self.found_device_id = device_id
+            self._notify_device(device_id, device_type)
             row = make_row(
                 device_id=device_id,
                 raw=data,
@@ -153,7 +160,7 @@ class LiveSession:
         self._meter = meter
 
         def on_found() -> None:
-            self.found_device_id = meter.device_id
+            self._notify_device(int(meter.device_id), DeviceType.PowerMeter.value)
             self._status(f"Connesso device_id={meter.device_id}")
 
         original_on_data = meter.on_data

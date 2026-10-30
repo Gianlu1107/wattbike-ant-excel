@@ -1,17 +1,11 @@
-# Wattbike Logger — permessi chiavette ANT+ Dynastream/Garmin (VID 0fcf)
+# Wattbike Logger — permessi UNIVERSALI chiavette ANT+ (VID 0fcf, qualsiasi PID)
 #
 # Installed to /etc/udev/rules.d/42-ant-usb-sticks.rules
 
 ACTION!="add", GOTO="wattbike_ant_rules_end"
 SUBSYSTEM!="usb", GOTO="wattbike_ant_rules_end"
 
-ATTR{idVendor}=="0fcf", ATTR{idProduct}=="1008", ENV{ID_ANT_DEVICE}="1", TAG+="uaccess", GROUP="plugdev", MODE="0666"
-ATTR{idVendor}=="0fcf", ATTR{idProduct}=="1009", ENV{ID_ANT_DEVICE}="1", TAG+="uaccess", GROUP="plugdev", MODE="0666"
-ATTR{idVendor}=="0fcf", ATTR{idProduct}=="1004", ENV{ID_ANT_DEVICE}="1", TAG+="uaccess", GROUP="plugdev", MODE="0666"
-ATTR{idVendor}=="0fcf", ATTR{idProduct}=="1003", ENV{ID_ANT_DEVICE}="1", TAG+="uaccess", GROUP="plugdev", MODE="0666"
-ATTR{idVendor}=="0fcf", ATTR{idProduct}=="1005", ENV{ID_ANT_DEVICE}="1", TAG+="uaccess", GROUP="plugdev", MODE="0666"
-ATTR{idVendor}=="0fcf", ATTR{idProduct}=="1006", ENV{ID_ANT_DEVICE}="1", TAG+="uaccess", GROUP="plugdev", MODE="0666"
-# Catch-all altri prodotti ANT dello stesso vendor
+# Qualsiasi stick Dynastream/Garmin/Suunto ANT (non solo PID noti)
 ATTR{idVendor}=="0fcf", ENV{ID_ANT_DEVICE}="1", TAG+="uaccess", GROUP="plugdev", MODE="0666"
 
 LABEL="wattbike_ant_rules_end"

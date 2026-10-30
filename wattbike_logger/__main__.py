@@ -145,7 +145,7 @@ def build_parser() -> argparse.ArgumentParser:
         "-i",
         type=int,
         default=0,
-        help="ID dispositivo ANT+ (0 = ascolta qualsiasi PowerMeter)",
+        help="ID PowerMeter ANT+ (0 = auto: qualsiasi, universale)",
     )
     p_rec.add_argument("--output", "-o", type=str, default=None, help="File .xlsx di output")
     p_rec.add_argument(

@@ -57,7 +57,9 @@ Le regole udev ANT+ vengono installate col pacchetto (eventualmente esci/rientra
 
 Se qualcosa resta bloccato: pulsante **Driver** in alto a destra.
 
-Per pubblicare una release: `git tag v1.4.0 && git push origin v1.4.0` (GitHub Actions crea pkg / Setup.exe / deb + zip app).
+**Device ID:** lascia `0` per ascoltare automaticamente qualsiasi PowerMeter ANT+ (Wattbike o altro). Imposta un ID solo se vuoi filtrare un dispositivo specifico.
+
+Per pubblicare una release: `git tag v1.4.1 && git push origin v1.4.1` (GitHub Actions crea pkg / Setup.exe / deb + zip app).
 
 ## Requisiti (da sorgente)
 
@@ -153,7 +155,7 @@ Installer locali:
 ./scripts/linux/build_deb.sh
 
 # Windows (con Inno Setup 6 installato) → out/WattbikeLogger-windows-x64-Setup.exe
-iscc /DMyAppVersion=1.4.0 /DSourceExe=dist\WattbikeLogger-windows-x64.exe /DOutputDir=%cd%\out scripts\windows\WattbikeLogger.iss
+iscc /DMyAppVersion=1.4.1 /DSourceExe=dist\WattbikeLogger-windows-x64.exe /DOutputDir=%cd%\out scripts\windows\WattbikeLogger.iss
 ```
 
 Vedi [CHANGELOG.md](CHANGELOG.md).

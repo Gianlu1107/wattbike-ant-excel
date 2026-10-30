@@ -17,9 +17,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-# Dynastream / Garmin ANT USB (VID 0x0FCF)
+# Dynastream / Garmin / Suunto ANT USB sticks — vendor unico, PID dinamici
 ANT_VID = 0x0FCF
-ANT_PIDS = (0x1008, 0x1009, 0x1004, 0x1003, 0x1006, 0x1005)
+# Seed noti (Garmin stick, USB2, USB-m, …). In più: qualunque PID rilevato a runtime.
+ANT_PIDS_SEED = (
+    0x1003, 0x1004, 0x1005, 0x1006, 0x1008, 0x1009,
+    0x100A, 0x100B, 0x100C, 0x100D, 0x100E, 0x100F,
+)
 
 LIBUSB_WIN32_ZIP = (
     "https://github.com/mcuee/libusb-win32/releases/download/"
@@ -175,7 +179,7 @@ def configure_usb_backend() -> None:
 
 
 def list_ant_sticks() -> list[tuple[int, int]]:
-    """Elenca (vid, pid) delle chiavette ANT visibili via pyusb."""
+    """Elenca (vid, pid) di QUALSIASI dispositivo USB con VID ANT (0x0FCF)."""
     configure_usb_backend()
     found: list[tuple[int, int]] = []
     try:
@@ -185,9 +189,7 @@ def list_ant_sticks() -> list[tuple[int, int]]:
 
     def _scan() -> None:
         try:
-            for pid in ANT_PIDS:
-                for dev in usb.core.find(find_all=True, idVendor=ANT_VID, idProduct=pid) or []:
-                    found.append((int(dev.idVendor), int(dev.idProduct)))
+            # Universale: tutto il vendor Dynastream/Garmin ANT, qualsiasi PID
             for dev in usb.core.find(find_all=True, idVendor=ANT_VID) or []:
                 pair = (int(dev.idVendor), int(dev.idProduct))
                 if pair not in found:
@@ -199,6 +201,60 @@ def list_ant_sticks() -> list[tuple[int, int]]:
     t.start()
     t.join(2.5)
     return list(found)
+
+
+def discover_ant_hardware_ids() -> list[str]:
+    """
+    Hardware ID Windows/USB per filtri libusb: stick collegate + seed + PnP.
+    Formato: USB\\VID_0FCF&PID_XXXX
+    """
+    ids: list[str] = []
+
+    def _add(pid: int) -> None:
+        hid = f"USB\\VID_{ANT_VID:04X}&PID_{pid:04X}"
+        if hid not in ids:
+            ids.append(hid)
+
+    for pid in ANT_PIDS_SEED:
+        _add(pid)
+    for _vid, pid in list_ant_sticks():
+        _add(pid)
+
+    if sys.platform.startswith("win"):
+        # Qualsiasi device già visto da Windows con VID_0FCF (anche non ancora libusb)
+        ps = (
+            "Get-PnpDevice -ErrorAction SilentlyContinue | "
+            "Where-Object { $_.InstanceId -match 'VID_0FCF' } | "
+            "ForEach-Object { $_.InstanceId }"
+        )
+        try:
+            proc = subprocess.run(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+            for line in (proc.stdout or "").splitlines():
+                line = line.strip().upper()
+                if "VID_0FCF" not in line:
+                    continue
+                # USB\VID_0FCF&PID_1008\... → USB\VID_0FCF&PID_1008
+                parts = line.split("\\")
+                if len(parts) >= 2 and parts[0] == "USB" and "PID_" in parts[1]:
+                    hid = "\\".join(parts[:2]).split("&MI_")[0]
+                    if hid not in ids:
+                        ids.append(hid)
+                    # estrai PID numerico anche per seed futuro
+                    try:
+                        pid_hex = parts[1].split("PID_")[1].split("&")[0]
+                        _add(int(pid_hex, 16))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    return ids
 
 
 def stick_accessible(timeout_s: float = 3.0) -> bool:
@@ -465,19 +521,18 @@ def _ensure_windows(on_status: StatusFn | None) -> DriverStatus:
         return diagnose()
 
     filter_exe = bin_dir / "install-filter.exe"
-    sticks = list_ant_sticks()
-    pids = [pid for _, pid in sticks] or list(ANT_PIDS)
-
-    # Uno script elevato unico (un solo prompt UAC) per tutti i PID
-    _status(on_status, "Installazione driver ANT+ (conferma UAC se richiesto)…")
+    hw_ids = discover_ant_hardware_ids()
+    _status(
+        on_status,
+        f"Installazione driver ANT+ per {len(hw_ids)} hardware ID (UAC se richiesto)…",
+    )
+    # Uno script elevato unico: seed + stick collegate + PnP Windows (universale)
     lines = ["@echo off", "setlocal"]
-    for pid in pids:
-        device_id = f"USB\\VID_{ANT_VID:04X}&PID_{pid:04X}"
+    for device_id in hw_ids:
         lines.append(f'"{filter_exe}" install --device={device_id}')
     lines.append("exit /b 0")
     bat = _app_data_dir() / "install_ant_filters.bat"
     bat.write_text("\r\n".join(lines) + "\r\n", encoding="utf-8")
-
     ps = (
         f'Start-Process -FilePath "{bat}" -Verb RunAs -Wait -WindowStyle Hidden'
     )
@@ -497,19 +552,13 @@ def _ensure_windows(on_status: StatusFn | None) -> DriverStatus:
 
 
 def _udev_rules_text() -> str:
-    lines = [
-        '# Wattbike Logger — permessi chiavette ANT+ (VID 0fcf)',
-        'ACTION!="add", GOTO="wattbike_ant_rules_end"',
-        'SUBSYSTEM!="usb", GOTO="wattbike_ant_rules_end"',
-        "",
-    ]
-    for pid in ANT_PIDS:
-        lines.append(
-            f'ATTR{{idVendor}}=="0fcf", ATTR{{idProduct}}=="{pid:04x}", '
-            f'TAG+="uaccess", GROUP="plugdev", MODE="0666"'
-        )
-    lines += ["", 'LABEL="wattbike_ant_rules_end"', ""]
-    return "\n".join(lines)
+    # Universale: tutto VID 0fcf (qualsiasi prodotto ANT), non solo PID fissi
+    return """# Wattbike Logger — permessi chiavette ANT+ (qualsiasi PID, VID 0fcf)
+ACTION!="add", GOTO="wattbike_ant_rules_end"
+SUBSYSTEM!="usb", GOTO="wattbike_ant_rules_end"
+ATTR{idVendor}=="0fcf", ENV{ID_ANT_DEVICE}="1", TAG+="uaccess", GROUP="plugdev", MODE="0666"
+LABEL="wattbike_ant_rules_end"
+"""
 
 
 def _ensure_linux(on_status: StatusFn | None) -> DriverStatus:

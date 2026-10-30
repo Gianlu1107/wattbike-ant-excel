@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.1
+
+- Universale/dinamico: Device ID default **0 (auto)**; rileva qualsiasi PowerMeter
+- Driver Windows: filtri per tutti i PID ANT rilevati (PnP + seed), non solo lista fissa
+- Linux udev: regola per **qualsiasi** stick VID `0fcf`
+- Mostra USB PID della stick e Device ID ANT+ rilevato in sessione
+
 ## 1.4.0
 
 - Plug-and-play ANT+: all’avvio prepara i driver in automatico (Windows libusb-win32, Linux udev, macOS libusb)
