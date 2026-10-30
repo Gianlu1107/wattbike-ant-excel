@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.5
+
+- Fix script build `wdi-simple` (parser PowerShell / patch config.h)
+
 ## 1.4.4
 
 - Fix build CI di `wdi-simple` (MSBuild quoting / config.h paths)
