@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.9
+
+- Comando `diagnose` (JSON su file) per verificare chiavetta da remoto/CI
+- Console allocata per i comandi CLI su Windows (exe windowed)
+- CI: macOS 15; release anche se una piattaforma fallisce
+
 ## 1.4.8
 
 - Windows: `wdi-simple` usa `--dest` in AppData (evita Access denied su cartella `usb_driver` in conflitto)

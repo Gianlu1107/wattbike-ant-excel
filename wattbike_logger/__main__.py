@@ -103,6 +103,60 @@ def cmd_gui(_args: argparse.Namespace) -> int:
     return run_gui()
 
 
+def cmd_diagnose(args: argparse.Namespace) -> int:
+    """Diagnostica chiavetta ANT+ (e scrive JSON per verifica remota)."""
+    from .drivers import (
+        _app_data_dir,
+        diagnose,
+        list_ant_pnp_devices,
+        list_ant_sticks,
+    )
+
+    st = diagnose()
+    pnp = []
+    try:
+        pnp = [
+            {
+                "friendly_name": d.friendly_name,
+                "status": d.status,
+                "problem": d.problem,
+                "hardware_id": d.hardware_id,
+                "instance_id": d.instance_id,
+            }
+            for d in list_ant_pnp_devices()
+        ]
+    except Exception as exc:
+        pnp = [{"error": str(exc)}]
+    sticks = []
+    try:
+        sticks = [{"vid": f"{v:04X}", "pid": f"{p:04X}"} for v, p in list_ant_sticks()]
+    except Exception as exc:
+        sticks = [{"error": str(exc)}]
+
+    payload = {
+        "version": __version__,
+        "ok": st.ok,
+        "stick_present": st.stick_present,
+        "stick_accessible": st.stick_accessible,
+        "backend_ready": st.backend_ready,
+        "can_auto_install": st.can_auto_install,
+        "detail": st.detail,
+        "pyusb_sticks": sticks,
+        "pnp_devices": pnp,
+    }
+    out = Path(args.output) if getattr(args, "output", None) else (_app_data_dir() / "diagnose.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(json.dumps(payload, indent=2, ensure_ascii=False))
+    print(f"Scritto: {out.resolve()}")
+    # 0 = chiavetta usabile dal programma; 1 = presente ma non accessibile; 2 = assente
+    if st.stick_accessible:
+        return 0
+    if st.stick_present:
+        return 1
+    return 2
+
+
 def cmd_setup_drivers(args: argparse.Namespace) -> int:
     from .drivers import diagnose, ensure_drivers, prepare_plug_and_play
 
@@ -135,6 +189,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_drv = sub.add_parser("setup-drivers", help="Controlla/installa driver ANT+ per questo OS")
     p_drv.add_argument("--quiet", action="store_true", help="Meno output")
     p_drv.set_defaults(func=cmd_setup_drivers)
+    p_diag = sub.add_parser("diagnose", help="Diagnostica chiavetta ANT+ (JSON + file)")
+    p_diag.add_argument(
+        "--output", "-o", type=str, default=None, help="Percorso diagnose.json"
+    )
+    p_diag.set_defaults(func=cmd_diagnose)
     p_scan = sub.add_parser("scan", help="Cerca la Wattbike (PowerMeter ANT+)")
     p_scan.add_argument("--timeout", type=float, default=20.0, help="Secondi di scansione")
     p_scan.set_defaults(func=cmd_scan)
