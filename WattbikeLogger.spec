@@ -152,8 +152,8 @@ if is_macos:
         info_plist={
             "CFBundleName": "Wattbike Logger",
             "CFBundleDisplayName": "Wattbike Logger",
-            "CFBundleShortVersionString": "1.4.5",
-            "CFBundleVersion": "1.4.5",
+            "CFBundleShortVersionString": "1.4.6",
+            "CFBundleVersion": "1.4.6",
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "12.0",
             "NSAppleEventsUsageDescription": "Wattbike Logger",

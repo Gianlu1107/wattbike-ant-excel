@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.6
+
+- CI: `wdi-simple` OK; `libusb-1.0.dll` opzionale (non blocca più la release Windows)
+
 ## 1.4.5
 
 - Fix script build `wdi-simple` (parser PowerShell / patch config.h)
