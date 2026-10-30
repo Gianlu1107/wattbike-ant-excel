@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.2
+
+- Windows: rileva la chiavetta anche in «Altri dispositivi» (warning) e installa driver di funzione libusb-win32 + WinUSB
+- Installazione driver silenziosa (niente finestre Terminale): solo UAC + log nella finestra dell’app
+- Pannello log driver in-app; setup Inno con `runhidden`
+
 ## 1.4.1
 
 - Universale/dinamico: Device ID default **0 (auto)**; rileva qualsiasi PowerMeter

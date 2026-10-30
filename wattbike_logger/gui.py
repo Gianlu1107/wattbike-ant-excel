@@ -60,6 +60,7 @@ class WattbikeApp(tk.Tk):
         self._busy = False  # countdown / driver install / update
         self._driver_fix_attempted = False
         self._last_stick_present = False
+        self._driver_logging = False
 
         self._build_style()
         self._build_ui()
@@ -132,6 +133,29 @@ class WattbikeApp(tk.Tk):
         self.lbl_elapsed = self._metric_box(metrics, "Tempo", "00:00", 2)
         self.lbl_avg = self._metric_box(metrics, "Media W", "—", 3)
         self.lbl_packets = self._metric_box(metrics, "Pacchetti", "0", 4)
+
+        # Log installazione driver (nella finestra, non nel Terminale)
+        self.driver_log_frame = ttk.LabelFrame(self, text="Installazione driver ANT+", padding=6)
+        log_wrap = ttk.Frame(self.driver_log_frame)
+        log_wrap.pack(fill=tk.BOTH, expand=True)
+        self.txt_driver_log = tk.Text(
+            log_wrap,
+            height=7,
+            wrap=tk.WORD,
+            font=_UI_FONT_SMALL,
+            bg="#ffffff",
+            fg="#222222",
+            relief=tk.FLAT,
+            highlightthickness=1,
+            highlightbackground=_CHART_BORDER,
+            state=tk.DISABLED,
+        )
+        scroll = ttk.Scrollbar(log_wrap, command=self.txt_driver_log.yview)
+        self.txt_driver_log.configure(yscrollcommand=scroll.set)
+        self.txt_driver_log.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        # Nascosto finché non parte un'installazione
+        self._driver_log_visible = False
 
         charts = ttk.Frame(self, padding=(10, 0, 10, 10))
         charts.pack(fill=tk.BOTH, expand=True)
@@ -315,7 +339,40 @@ class WattbikeApp(tk.Tk):
         )
 
     def _set_status(self, text: str) -> None:
-        self.lbl_status.configure(text=text)
+        short = text if len(text) <= 90 else text[:87] + "…"
+        self.lbl_status.configure(text=short)
+        if self._driver_logging:
+            self._append_driver_log(text)
+
+    def _show_driver_log(self, *, clear: bool = False) -> None:
+        self._driver_logging = True
+        if clear:
+            self.txt_driver_log.configure(state=tk.NORMAL)
+            self.txt_driver_log.delete("1.0", tk.END)
+            self.txt_driver_log.configure(state=tk.DISABLED)
+        if not self._driver_log_visible:
+            self.driver_log_frame.pack(fill=tk.X, padx=10, pady=(0, 6), before=self.plot_frame)
+            self._driver_log_visible = True
+
+    def _hide_driver_log(self, *, delay_ms: int = 0) -> None:
+        def _do() -> None:
+            self._driver_logging = False
+            if self._driver_log_visible:
+                self.driver_log_frame.pack_forget()
+                self._driver_log_visible = False
+
+        if delay_ms > 0:
+            self.after(delay_ms, _do)
+        else:
+            _do()
+
+    def _append_driver_log(self, text: str) -> None:
+        if not text:
+            return
+        self.txt_driver_log.configure(state=tk.NORMAL)
+        self.txt_driver_log.insert(tk.END, text.rstrip() + "\n")
+        self.txt_driver_log.see(tk.END)
+        self.txt_driver_log.configure(state=tk.DISABLED)
 
     def _update_start_enabled(self) -> None:
         if self._recording or self._countdown_job or self._busy:
@@ -615,6 +672,8 @@ class WattbikeApp(tk.Tk):
 
     def _bootstrap_drivers_async(self) -> None:
         """All'avvio: prepara driver in automatico (plug-and-play), senza dialoghi."""
+        self._show_driver_log(clear=True)
+        self._append_driver_log("Preparazione supporto ANT+…")
 
         def worker() -> None:
             from .drivers import open_zadig_fallback, prepare_plug_and_play
@@ -633,6 +692,12 @@ class WattbikeApp(tk.Tk):
             return
         if st.stick_present and (st.ok or st.accessible):
             self._set_status("Chiavetta ANT pronta — puoi premere Start.")
+            self._hide_driver_log(delay_ms=2500)
+        elif st.backend_ready and not st.stick_present:
+            self._append_driver_log(st.detail)
+            self._hide_driver_log(delay_ms=4000)
+        else:
+            self._append_driver_log(st.detail)
 
     def _on_repair_drivers(self) -> None:
         from .drivers import open_zadig_fallback
@@ -645,7 +710,9 @@ class WattbikeApp(tk.Tk):
         self._busy = True
         self._driver_fix_attempted = True
         self._update_start_enabled()
+        self._show_driver_log(clear=True)
         self._set_status("Installazione / riparazione driver…")
+        self._append_driver_log("Installazione / riparazione driver in corso…")
 
         def worker() -> None:
             from .drivers import ensure_drivers
@@ -687,21 +754,27 @@ class WattbikeApp(tk.Tk):
     ) -> None:
         self._busy = False
         self._apply_driver_status(result)
+        self._append_driver_log(result.detail)
         if result.stick_present and (result.ok or result.accessible):
             self._set_status("Chiavetta ANT pronta — puoi premere Start.")
+            self._hide_driver_log(delay_ms=3000)
             if not silent:
                 messagebox.showinfo("Driver", "Setup completato.\n" + result.detail)
             return
         if result.backend_ready and not result.stick_present:
             self._set_status("Driver pronti. Collega la chiavetta USB ANT+.")
+            self._hide_driver_log(delay_ms=5000)
             if not silent:
                 messagebox.showinfo(
                     "Driver",
                     "Driver ANT+ configurati.\nCollega ora la chiavetta USB e attendi un attimo.",
                 )
             return
-        # Fallimento
+        # Fallimento — lascia il log visibile
         self._set_status(result.detail)
+        self._append_driver_log(
+            "Se la chiavetta resta in «Altri dispositivi», scollegala e ricollegala."
+        )
         if silent:
             return
         if sys.platform.startswith("win"):
@@ -711,6 +784,7 @@ class WattbikeApp(tk.Tk):
                 "Aprire Zadig per installare libusb-win32 manualmente?\n"
                 "(Options → List All Devices → stick ANT → libusb-win32)",
             ):
+                self._show_driver_log()
                 open_zadig_fallback(on_status=lambda s: self._status_queue.put(s))
         else:
             messagebox.showwarning("Driver", result.detail)

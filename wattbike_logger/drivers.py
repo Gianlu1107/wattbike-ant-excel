@@ -34,7 +34,32 @@ ZADIG_URL = "https://github.com/pbatard/libwdi/releases/download/v1.5.1/zadig-2.
 StatusFn = Callable[[str], None]
 _PREPARED_FLAG = "drivers_prepared.json"
 _usb_backend_configured = False
+# Windows: nasconde qualsiasi console di powershell/cmd
+_CREATE_NO_WINDOW = 0x08000000
 
+
+def _win_run(
+    args: list[str],
+    *,
+    timeout: float | None = 60,
+    capture: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    """Esegue un comando Windows senza mostrare finestre Terminale."""
+    kwargs: dict = {
+        "args": args,
+        "check": False,
+        "timeout": timeout,
+        "text": True,
+    }
+    if capture:
+        kwargs["capture_output"] = True
+    else:
+        kwargs["stdin"] = subprocess.DEVNULL
+        kwargs["stdout"] = subprocess.DEVNULL
+        kwargs["stderr"] = subprocess.DEVNULL
+    if sys.platform.startswith("win"):
+        kwargs["creationflags"] = _CREATE_NO_WINDOW
+    return subprocess.run(**kwargs)
 
 @dataclass
 class DriverStatus:
@@ -116,6 +141,16 @@ def clear_backend_prepared() -> None:
         pass
 
 
+def _win_dll_candidates(name: str) -> list[Path]:
+    arch = _windows_arch_dir()
+    return [
+        _exe_dir() / name,
+        _app_data_dir() / "libusb-win32" / "bin" / arch / name,
+        _app_data_dir() / "driver_setup" / name,
+        _resource_path("resources", "windows", name),
+    ]
+
+
 def configure_usb_backend() -> None:
     """Punta pyusb alle DLL/dylib bundled o in cache (una sola volta)."""
     global _usb_backend_configured
@@ -123,55 +158,68 @@ def configure_usb_backend() -> None:
         return
     _usb_backend_configured = True
 
-    candidates: list[Path] = []
+    libusb1_path: Path | None = None
+    libusb0_path: Path | None = None
+
     if sys.platform.startswith("win"):
-        for name in ("libusb0.dll", "libusb-1.0.dll", "libusb0_x86.dll"):
-            candidates += [
-                _exe_dir() / name,
-                _app_data_dir() / "libusb-win32" / "bin" / _windows_arch_dir() / name,
-                _resource_path("resources", "windows", name),
-            ]
+        libusb0_path = next(
+            (c for n in ("libusb0.dll", "libusb0_x86.dll") for c in _win_dll_candidates(n) if c.is_file()),
+            None,
+        )
+        libusb1_path = next(
+            (c for c in _win_dll_candidates("libusb-1.0.dll") if c.is_file()),
+            None,
+        )
     elif sys.platform == "darwin":
-        # Frameworks (PyInstaller .app) + brew
         exe = Path(sys.executable).resolve()
         frameworks = exe.parent.parent / "Frameworks"
-        candidates += [
+        for c in (
             frameworks / "libusb-1.0.0.dylib",
             frameworks / "libusb-1.0.dylib",
             Path("/opt/homebrew/lib/libusb-1.0.dylib"),
             Path("/usr/local/lib/libusb-1.0.dylib"),
             _resource_path("resources", "macos", "libusb-1.0.dylib"),
-        ]
+        ):
+            if c.is_file():
+                libusb1_path = c
+                break
     else:
-        candidates += [
+        for c in (
             Path("/usr/lib/x86_64-linux-gnu/libusb-1.0.so.0"),
             Path("/usr/lib/libusb-1.0.so.0"),
             Path("/lib/x86_64-linux-gnu/libusb-1.0.so.0"),
-        ]
+        ):
+            if c.is_file():
+                libusb1_path = c
+                break
 
-    lib_path = next((c for c in candidates if c.is_file()), None)
-    if lib_path is None:
-        return
+    for p in (libusb1_path, libusb0_path):
+        if p is not None:
+            os.environ.setdefault("DYLD_FALLBACK_LIBRARY_PATH", str(p.parent))
+            os.environ.setdefault("LD_LIBRARY_PATH", str(p.parent))
+            break
 
-    # Aiuta find_library / ctypes
-    os.environ.setdefault("DYLD_FALLBACK_LIBRARY_PATH", str(lib_path.parent))
-    os.environ.setdefault("LD_LIBRARY_PATH", str(lib_path.parent))
-    try:
-        import usb.backend.libusb1 as libusb1
+    if libusb1_path is not None:
+        try:
+            import usb.backend.libusb1 as libusb1
 
-        def _find(_name: str) -> str:
-            return str(lib_path)
+            path = str(libusb1_path)
 
-        # Solo registra il backend: non chiamare usb.core.find qui (può bloccarsi)
-        libusb1.get_backend(find_library=_find)
-    except Exception:
-        pass
-    if sys.platform.startswith("win"):
+            def _find1(_name: str) -> str:
+                return path
+
+            libusb1.get_backend(find_library=_find1)
+        except Exception:
+            pass
+
+    if libusb0_path is not None:
         try:
             import usb.backend.libusb0 as libusb0
 
+            path0 = str(libusb0_path)
+
             def _find0(_name: str) -> str:
-                return str(lib_path)
+                return path0
 
             libusb0.get_backend(find_library=_find0)
         except Exception:
@@ -203,9 +251,75 @@ def list_ant_sticks() -> list[tuple[int, int]]:
     return list(found)
 
 
+@dataclass
+class PnpAntDevice:
+    """Chiavetta vista da Windows PnP (anche senza driver → 'Altri dispositivi')."""
+
+    instance_id: str
+    friendly_name: str
+    status: str
+    problem: str
+    hardware_id: str  # USB\VID_0FCF&PID_XXXX
+
+
+def list_ant_pnp_devices() -> list[PnpAntDevice]:
+    """
+    Elenca stick ANT da Gestione dispositivi (Windows).
+    Funziona anche se il device è in 'Altri dispositivi' senza driver.
+    """
+    if not sys.platform.startswith("win"):
+        return []
+    # JSON via PowerShell — nessuna finestra
+    ps = r"""
+$ErrorActionPreference='SilentlyContinue'
+$devs = Get-PnpDevice | Where-Object {
+  $_.InstanceId -match 'VID_0FCF' -or $_.FriendlyName -match 'ANT\s*USB'
+}
+$out = @()
+foreach ($d in $devs) {
+  $hid = ($d.InstanceId -split '\\')[0..1] -join '\'
+  if ($hid -match '&MI_') { $hid = ($hid -split '&MI_')[0] }
+  $out += [PSCustomObject]@{
+    InstanceId = $d.InstanceId
+    FriendlyName = $d.FriendlyName
+    Status = [string]$d.Status
+    Problem = [string]$d.Problem
+    HardwareId = $hid.ToUpper()
+  }
+}
+$out | ConvertTo-Json -Compress
+"""
+    try:
+        proc = _win_run(
+            ["powershell", "-NoProfile", "-WindowStyle", "Hidden",
+             "-ExecutionPolicy", "Bypass", "-Command", ps],
+            timeout=25,
+        )
+        raw = (proc.stdout or "").strip()
+        if not raw:
+            return []
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            data = [data]
+        result: list[PnpAntDevice] = []
+        for item in data:
+            result.append(
+                PnpAntDevice(
+                    instance_id=str(item.get("InstanceId") or ""),
+                    friendly_name=str(item.get("FriendlyName") or "ANT USB"),
+                    status=str(item.get("Status") or ""),
+                    problem=str(item.get("Problem") or ""),
+                    hardware_id=str(item.get("HardwareId") or "").upper(),
+                )
+            )
+        return result
+    except Exception:
+        return []
+
+
 def discover_ant_hardware_ids() -> list[str]:
     """
-    Hardware ID Windows/USB per filtri libusb: stick collegate + seed + PnP.
+    Hardware ID Windows/USB per installazione driver: seed + pyusb + PnP.
     Formato: USB\\VID_0FCF&PID_XXXX
     """
     ids: list[str] = []
@@ -215,46 +329,48 @@ def discover_ant_hardware_ids() -> list[str]:
         if hid not in ids:
             ids.append(hid)
 
+    def _add_hid(hid: str) -> None:
+        hid = hid.upper().split("&MI_")[0]
+        if hid.startswith("USB\\") and hid not in ids:
+            ids.append(hid)
+
     for pid in ANT_PIDS_SEED:
         _add(pid)
     for _vid, pid in list_ant_sticks():
         _add(pid)
-
-    if sys.platform.startswith("win"):
-        # Qualsiasi device già visto da Windows con VID_0FCF (anche non ancora libusb)
-        ps = (
-            "Get-PnpDevice -ErrorAction SilentlyContinue | "
-            "Where-Object { $_.InstanceId -match 'VID_0FCF' } | "
-            "ForEach-Object { $_.InstanceId }"
-        )
-        try:
-            proc = subprocess.run(
-                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
-                capture_output=True,
-                text=True,
-                timeout=20,
-                check=False,
-            )
-            for line in (proc.stdout or "").splitlines():
-                line = line.strip().upper()
-                if "VID_0FCF" not in line:
-                    continue
-                # USB\VID_0FCF&PID_1008\... → USB\VID_0FCF&PID_1008
-                parts = line.split("\\")
-                if len(parts) >= 2 and parts[0] == "USB" and "PID_" in parts[1]:
-                    hid = "\\".join(parts[:2]).split("&MI_")[0]
-                    if hid not in ids:
-                        ids.append(hid)
-                    # estrai PID numerico anche per seed futuro
-                    try:
-                        pid_hex = parts[1].split("PID_")[1].split("&")[0]
-                        _add(int(pid_hex, 16))
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+    for dev in list_ant_pnp_devices():
+        if "VID_0FCF" in dev.hardware_id:
+            _add_hid(dev.hardware_id)
+        elif "VID_0FCF" in dev.instance_id.upper():
+            parts = dev.instance_id.upper().split("\\")
+            if len(parts) >= 2:
+                _add_hid("\\".join(parts[:2]))
 
     return ids
+
+
+def windows_stick_present() -> tuple[bool, str]:
+    """
+    True se Windows vede una chiavetta ANT (anche senza driver).
+    Restituisce (present, dettaglio amichevole).
+    """
+    pnp = list_ant_pnp_devices()
+    if pnp:
+        names = ", ".join(sorted({d.friendly_name for d in pnp if d.friendly_name}))
+        bad = [d for d in pnp if d.status.upper() not in ("OK", "") or d.problem not in ("", "0", "CM_PROB_NONE")]
+        # Status Error / Unknown → tipicamente 'Altri dispositivi'
+        if any(d.status.upper() in ("ERROR", "UNKNOWN", "DEGRADED") for d in pnp) or bad:
+            return True, (
+                f"Rilevata «{names or 'ANT USB'}» ma senza driver corretto "
+                f"(Gestione dispositivi → Altri dispositivi). Installo il driver…"
+            )
+        return True, f"Chiavetta USB rilevata: {names or 'ANT'}"
+    # Fallback pyusb
+    sticks = list_ant_sticks()
+    if sticks:
+        pids = ", ".join(f"{pid:04X}" for _, pid in sticks)
+        return True, f"Chiavetta ANT USB (PID {pids})"
+    return False, ""
 
 
 def stick_accessible(timeout_s: float = 3.0) -> bool:
@@ -319,10 +435,12 @@ def diagnose() -> DriverStatus:
     configure_usb_backend()
     plat = sys.platform
     sticks = list_ant_sticks()
-    present = bool(sticks)
     accessible = stick_accessible()
+    present = bool(sticks)
 
     if plat.startswith("win"):
+        pnp_present, pnp_detail = windows_stick_present()
+        present = pnp_present or present
         prepared = is_backend_prepared() or _windows_filter_likely_ok()
         if present and accessible:
             return DriverStatus(
@@ -331,12 +449,12 @@ def diagnose() -> DriverStatus:
                 False, True,
             )
         if present and not accessible:
-            return DriverStatus(
-                False, plat, True, False,
-                "Chiavetta rilevata ma non accessibile: installo il driver libusb…",
-                True, prepared,
+            detail = pnp_detail or (
+                "Chiavetta rilevata ma non accessibile: installo il driver…"
             )
-        # Senza stick: find_driver può fallire anche con filtri OK
+            return DriverStatus(
+                False, plat, True, False, detail, True, prepared,
+            )
         if prepared:
             return DriverStatus(
                 True, plat, False, False,
@@ -345,7 +463,7 @@ def diagnose() -> DriverStatus:
             )
         return DriverStatus(
             False, plat, False, False,
-            "Configurazione driver ANT+ necessaria (una sola volta, richiede admin).",
+            "Configurazione driver ANT+ necessaria (una sola volta, conferma admin).",
             True, False,
         )
 
@@ -515,40 +633,263 @@ def _ensure_libusb_win32_files(on_status: StatusFn | None) -> Path | None:
     return bin_dir if filter_exe.is_file() else None
 
 
+def _write_libusb0_inf(hw_ids: list[str], dest: Path) -> Path:
+    """INF driver di funzione libusb-win32 (risolve 'Altri dispositivi' / warning)."""
+    models = []
+    strings = []
+    for i, hid in enumerate(hw_ids):
+        models.append(f"%DeviceDesc{i}%=LIBUSB0_DEV, {hid}")
+        pid = hid.split("PID_")[-1] if "PID_" in hid else str(i)
+        strings.append(f'DeviceDesc{i}="ANT USB Stick ({pid})"')
+    inf = "\n".join(
+        [
+            "[Version]",
+            'Signature="$WINDOWS NT$"',
+            "Class=libusb0_class",
+            "ClassGuid={EB781AAF-9C70-4523-A5DF-642A700474DF}",
+            "Provider=%ManufacturerName%",
+            "DriverVer=10/30/2026,1.4.2.0",
+            "",
+            "[ClassInstall32]",
+            "AddReg=libusb0_class_install",
+            "",
+            "[libusb0_class_install]",
+            'HKR,,,,"libusb-win32 devices"',
+            'HKR,,Icon,,"-20"',
+            "",
+            "[Manufacturer]",
+            "%ManufacturerName%=Standard,NTamd64,NTamd64.10.0",
+            "",
+            "[Standard.NTamd64]",
+            *models,
+            "",
+            "[Standard.NTamd64.10.0]",
+            *models,
+            "",
+            "[LIBUSB0_DEV.NT]",
+            "CopyFiles=LIBUSB0_SysFiles,LIBUSB0_DllFiles",
+            "",
+            "[LIBUSB0_DEV.NT.HW]",
+            "AddReg=LIBUSB0_AddReg",
+            "",
+            "[LIBUSB0_AddReg]",
+            'HKR,,DeviceInterfaceGUIDs,0x10000,"{F70242C7-FB25-443B-9E7E-A4260F373982}"',
+            "",
+            "[LIBUSB0_DEV.NT.Services]",
+            "AddService = libusb0, 0x00000002, LIBUSB0_AddService",
+            "",
+            "[LIBUSB0_AddService]",
+            'DisplayName    = "libusb-win32"',
+            "ServiceType    = 1",
+            "StartType      = 3",
+            "ErrorControl   = 1",
+            r"ServiceBinary  = %12%\libusb0.sys",
+            "",
+            "[DestinationDirs]",
+            "LIBUSB0_SysFiles=12",
+            "LIBUSB0_DllFiles=11",
+            "DefaultDestDir=11",
+            "",
+            "[LIBUSB0_SysFiles]",
+            "libusb0.sys",
+            "",
+            "[LIBUSB0_DllFiles]",
+            "libusb0.dll",
+            "",
+            "[SourceDisksNames]",
+            "1=%DiskName%,,,",
+            "",
+            "[SourceDisksFiles]",
+            "libusb0.sys=1",
+            "libusb0.dll=1",
+            "",
+            "[Strings]",
+            'ManufacturerName="WattbikeLogger"',
+            'DiskName="Wattbike ANT driver"',
+            *strings,
+            "",
+        ]
+    )
+    dest.write_text(inf, encoding="utf-8")
+    return dest
+
+
+def _write_winusb_inf(hw_ids: list[str], dest: Path) -> Path:
+    """INF WinUSB di fallback (Microsoft) se libusb0 non si applica."""
+    models = []
+    strings = []
+    for i, hid in enumerate(hw_ids):
+        models.append(f"%DeviceDesc{i}%=USB_Install, {hid}")
+        pid = hid.split("PID_")[-1] if "PID_" in hid else str(i)
+        strings.append(f'DeviceDesc{i}="ANT USB Stick ({pid})"')
+    inf = "\n".join(
+        [
+            "[Version]",
+            'Signature="$WINDOWS NT$"',
+            "Class=USBDevice",
+            "ClassGuid={88BAE032-5A81-49f0-BC3D-A4FF138216D6}",
+            "Provider=%ManufacturerName%",
+            "DriverVer=10/30/2026,1.4.2.0",
+            "",
+            "[DestinationDirs]",
+            "DefaultDestDir=12",
+            "",
+            "[Manufacturer]",
+            "%ManufacturerName%=Standard,NTamd64,NTamd64.10.0",
+            "",
+            "[Standard.NTamd64]",
+            *models,
+            "",
+            "[Standard.NTamd64.10.0]",
+            *models,
+            "",
+            "[USB_Install]",
+            "Include=winusb.inf",
+            "Needs=WINUSB.NT",
+            "",
+            "[USB_Install.Services]",
+            "Include=winusb.inf",
+            "Needs=WINUSB.NT.Services",
+            "",
+            "[USB_Install.HW]",
+            "Include=winusb.inf",
+            "Needs=WINUSB.NT.HW",
+            "",
+            "[Strings]",
+            'ManufacturerName="WattbikeLogger"',
+            *strings,
+            "",
+        ]
+    )
+    dest.write_text(inf, encoding="utf-8")
+    return dest
+
+
 def _ensure_windows(on_status: StatusFn | None) -> DriverStatus:
+    """
+    Installa driver SENZA finestre Terminale:
+    elevazione UAC nascosta (VBS), libusb0 function driver + filter, log → GUI.
+    """
     bin_dir = _ensure_libusb_win32_files(on_status)
     if bin_dir is None:
         return diagnose()
 
     filter_exe = bin_dir / "install-filter.exe"
     hw_ids = discover_ant_hardware_ids()
-    _status(
-        on_status,
-        f"Installazione driver ANT+ per {len(hw_ids)} hardware ID (UAC se richiesto)…",
-    )
-    # Uno script elevato unico: seed + stick collegate + PnP Windows (universale)
-    lines = ["@echo off", "setlocal"]
-    for device_id in hw_ids:
-        lines.append(f'"{filter_exe}" install --device={device_id}')
-    lines.append("exit /b 0")
-    bat = _app_data_dir() / "install_ant_filters.bat"
-    bat.write_text("\r\n".join(lines) + "\r\n", encoding="utf-8")
-    ps = (
-        f'Start-Process -FilePath "{bat}" -Verb RunAs -Wait -WindowStyle Hidden'
-    )
+    work = _app_data_dir() / "driver_setup"
+    work.mkdir(parents=True, exist_ok=True)
+    log_path = work / "install.log"
+    done_path = work / "install.done"
+    libusb_inf = work / "ant_libusb0.inf"
+    winusb_inf = work / "ant_winusb.inf"
+    ps1_path = work / "install_silent.ps1"
+    vbs_path = work / "elevate.vbs"
+
+    # Copia sys/dll accanto all'INF (richiesto da pnputil)
+    for name in ("libusb0.sys", "libusb0.dll"):
+        src = bin_dir / name
+        if not src.is_file() and name == "libusb0.dll":
+            alt = bin_dir / ("libusb0_x86.dll" if _windows_arch_dir() == "x86" else "libusb0.dll")
+            src = alt if alt.is_file() else src
+        if src.is_file():
+            try:
+                shutil.copy2(src, work / name)
+                shutil.copy2(src, _exe_dir() / ("libusb0.dll" if name.endswith(".dll") else name))
+            except Exception:
+                pass
+
+    _write_libusb0_inf(hw_ids, libusb_inf)
+    _write_winusb_inf(hw_ids, winusb_inf)
     try:
-        subprocess.run(
-            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
-            check=False,
-            timeout=180,
-        )
+        log_path.write_text("", encoding="utf-8")
+        done_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+    hw_ps = "@(" + ",".join("'" + h.replace("'", "''") + "'" for h in hw_ids) + ")"
+    ps1_path.write_text(
+        "\n".join(
+            [
+                "$ErrorActionPreference = 'Continue'",
+                f"$log = '{log_path}'",
+                f"$done = '{done_path}'",
+                "function L($m) { $line = (Get-Date -Format 'HH:mm:ss') + ' ' + $m; Add-Content -Path $log -Value $line -Encoding UTF8 }",
+                "L 'Avvio installazione driver ANT+ (silenziosa)…'",
+                f"L ('Hardware ID da configurare: {len(hw_ids)}')",
+                "L '1/3 pnputil driver libusb-win32 (funzione)…'",
+                f"$p1 = Start-Process -FilePath 'pnputil.exe' -ArgumentList @('/add-driver','{libusb_inf}','/install') -Wait -PassThru -WindowStyle Hidden",
+                "L ('  libusb0 pnputil exit=' + $p1.ExitCode)",
+                "L '2/3 pnputil WinUSB (fallback)…'",
+                f"$p2 = Start-Process -FilePath 'pnputil.exe' -ArgumentList @('/add-driver','{winusb_inf}','/install') -Wait -PassThru -WindowStyle Hidden",
+                "L ('  winusb pnputil exit=' + $p2.ExitCode)",
+                f"$filter = '{filter_exe}'",
+                "L '3/3 install-filter libusb-win32…'",
+                "if (Test-Path $filter) {",
+                f"  foreach ($id in {hw_ps}) {{",
+                "    L ('  filter ' + $id)",
+                "    $p = Start-Process -FilePath $filter -ArgumentList @('install',('--device=' + $id)) -Wait -PassThru -WindowStyle Hidden",
+                "    L ('    exit=' + $p.ExitCode)",
+                "  }",
+                "} else { L '  install-filter.exe non trovato' }",
+                "L 'Riavvio dispositivi PnP ANT…'",
+                "Get-PnpDevice -ErrorAction SilentlyContinue | Where-Object { $_.InstanceId -match 'VID_0FCF' -or $_.FriendlyName -match 'ANT' } | ForEach-Object {",
+                "  L ('  reset ' + $_.FriendlyName + ' [' + $_.Status + ']')",
+                "  Disable-PnpDevice -InstanceId $_.InstanceId -Confirm:$false -ErrorAction SilentlyContinue",
+                "  Start-Sleep -Milliseconds 500",
+                "  Enable-PnpDevice -InstanceId $_.InstanceId -Confirm:$false -ErrorAction SilentlyContinue",
+                "}",
+                "L 'Installazione completata.'",
+                "L 'Se la chiavetta è ancora in Altri dispositivi: scollega e ricollega.'",
+                "Set-Content -Path $done -Value 'ok' -Encoding UTF8",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    # Elevazione senza console (ultimo arg 0 = finestra nascosta)
+    vbs_path.write_text(
+        "Set sh = CreateObject(\"Shell.Application\")\r\n"
+        f"sh.ShellExecute \"powershell.exe\", \"-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"\"{ps1_path}\"\"\", \"\", \"runas\", 0\r\n",
+        encoding="utf-8",
+    )
+
+    _status(on_status, "Conferma UAC admin (nessun Terminale)…")
+    try:
+        _win_run(["wscript.exe", "//B", "//Nologo", str(vbs_path)], timeout=30, capture=False)
     except Exception as exc:
-        _status(on_status, f"Errore elevazione UAC: {exc}")
+        _status(on_status, f"Impossibile avviare installazione elevata: {exc}")
         return diagnose()
 
-    mark_backend_prepared("libusb-win32 filters installed")
-    _status(on_status, "Driver installati. Se la chiavetta era collegata, ristaccala una volta.")
-    return diagnose()
+    deadline = time.time() + 180
+    seen = 0
+    while time.time() < deadline:
+        try:
+            if log_path.is_file():
+                lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+                while seen < len(lines):
+                    _status(on_status, lines[seen])
+                    seen += 1
+            if done_path.is_file():
+                break
+        except OSError:
+            pass
+        time.sleep(0.35)
+
+    # Consenti a Windows di rilegare il device
+    global _usb_backend_configured
+    _usb_backend_configured = False
+    mark_backend_prepared("libusb0+winusb silent")
+    time.sleep(1.2)
+    st = diagnose()
+    if st.stick_present and not st.accessible:
+        _status(
+            on_status,
+            "Driver applicati. Scollega e ricollega la chiavetta ANT, poi attendi 2 s.",
+        )
+    elif st.accessible:
+        _status(on_status, "Chiavetta ANT pronta — puoi premere Start.")
+    return st
 
 
 def _udev_rules_text() -> str:

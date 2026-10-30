@@ -3,7 +3,7 @@
 ; Variabili da CI: MyAppVersion, SourceExe, OutputDir
 
 #ifndef MyAppVersion
-  #define MyAppVersion "1.4.1"
+  #define MyAppVersion "1.4.2"
 #endif
 #ifndef SourceExe
   #define SourceExe "..\..\dist\WattbikeLogger-windows-x64.exe"
@@ -64,7 +64,8 @@ Name: "{autodesktop}\Wattbike Logger"; Filename: "{app}\WattbikeLogger.exe"; Tas
 
 [Run]
 ; Prepara libusb-win32 (può mostrare UAC). Poi avvia l'app.
-Filename: "{app}\WattbikeLogger.exe"; Parameters: "setup-drivers --quiet"; StatusMsg: "Configurazione driver ANT+…"; Flags: postinstall waituntilterminated; Tasks: antdrivers
+; runhidden: nessun Terminale; StatusMsg resta nella wizard Inno
+Filename: "{app}\WattbikeLogger.exe"; Parameters: "setup-drivers --quiet"; StatusMsg: "Configurazione driver ANT+…"; Flags: postinstall waituntilterminated runhidden; Tasks: antdrivers
 Filename: "{app}\WattbikeLogger.exe"; Description: "Avvia Wattbike Logger"; Flags: nowait postinstall skipifsilent
 
 [Code]

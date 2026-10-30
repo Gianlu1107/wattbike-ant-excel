@@ -59,7 +59,7 @@ Se qualcosa resta bloccato: pulsante **Driver** in alto a destra.
 
 **Device ID:** lascia `0` per ascoltare automaticamente qualsiasi PowerMeter ANT+ (Wattbike o altro). Imposta un ID solo se vuoi filtrare un dispositivo specifico.
 
-Per pubblicare una release: `git tag v1.4.1 && git push origin v1.4.1` (GitHub Actions crea pkg / Setup.exe / deb + zip app).
+Per pubblicare una release: `git tag v1.4.2 && git push origin v1.4.2` (GitHub Actions crea pkg / Setup.exe / deb + zip app).
 
 ## Requisiti (da sorgente)
 
