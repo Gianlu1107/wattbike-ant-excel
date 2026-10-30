@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.3
+
+- Windows: `pnputil` con INF non firmati fallisce (`0xE000022F`) — installazione via **libwdi/wdi-simple** (come Zadig), silenziosa
+- Reset PnP solo su `VID_0FCF` (non più su device «Participant» ecc.)
+- Log driver in-app senza spam dallo stato hotplug
+- Bundle `wdi-simple.exe` + `libusb-1.0.dll` nel Setup Windows
+
 ## 1.4.2
 
 - Windows: rileva la chiavetta anche in «Altri dispositivi» (warning) e installa driver di funzione libusb-win32 + WinUSB

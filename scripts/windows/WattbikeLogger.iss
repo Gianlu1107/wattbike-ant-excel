@@ -3,7 +3,7 @@
 ; Variabili da CI: MyAppVersion, SourceExe, OutputDir
 
 #ifndef MyAppVersion
-  #define MyAppVersion "1.4.2"
+  #define MyAppVersion "1.4.3"
 #endif
 #ifndef SourceExe
   #define SourceExe "..\..\dist\WattbikeLogger-windows-x64.exe"
@@ -56,6 +56,9 @@ Name: "antdrivers"; Description: "Configura subito i driver della chiavetta ANT+
 
 [Files]
 Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "WattbikeLogger.exe"; Flags: ignoreversion
+; Driver installer (libwdi) + DLL WinUSB — opzionali se presenti in build CI
+Source: "..\..\wattbike_logger\resources\windows\wdi-simple.exe"; DestDir: "{app}"; DestName: "wdi-simple.exe"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "..\..\wattbike_logger\resources\windows\libusb-1.0.dll"; DestDir: "{app}"; DestName: "libusb-1.0.dll"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
 Name: "{group}\Wattbike Logger"; Filename: "{app}\WattbikeLogger.exe"

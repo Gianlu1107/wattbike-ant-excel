@@ -341,6 +341,9 @@ class WattbikeApp(tk.Tk):
     def _set_status(self, text: str) -> None:
         short = text if len(text) <= 90 else text[:87] + "…"
         self.lbl_status.configure(text=short)
+
+    def _set_status_and_driver_log(self, text: str) -> None:
+        self._set_status(text)
         if self._driver_logging:
             self._append_driver_log(text)
 
@@ -383,7 +386,10 @@ class WattbikeApp(tk.Tk):
     def _poll_queues(self) -> None:
         try:
             while True:
-                self._set_status(self._status_queue.get_nowait())
+                msg = self._status_queue.get_nowait()
+                self._set_status(msg)
+                if self._driver_logging:
+                    self._append_driver_log(msg)
         except queue.Empty:
             pass
         try:

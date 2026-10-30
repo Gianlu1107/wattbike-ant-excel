@@ -65,6 +65,31 @@ jobs:
         run: |
           choco install upx -y --no-progress
           choco install innosetup -y --no-progress
+          choco install 7zip.portable -y --no-progress
+
+      - name: Build wdi-simple + libusb-1.0.dll (Windows)
+        if: matrix.libusb == 'windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path wattbike_logger\resources\windows | Out-Null
+          powershell -ExecutionPolicy Bypass -File scripts\windows\build_wdi_simple.ps1
+          if (-not (Test-Path wattbike_logger\resources\windows\wdi-simple.exe)) {
+            throw "wdi-simple.exe missing after build"
+          }
+          # libusb-1.0.dll for WinUSB backend
+          $zip = "build\libusb-binaries.7z"
+          curl.exe -fsSL --retry 5 -o $zip "https://github.com/libusb/libusb/releases/download/v1.0.27/libusb-1.0.27-binaries.7z"
+          New-Item -ItemType Directory -Force -Path build\libusb1 | Out-Null
+          & 7z x $zip "-obuild\libusb1" -y | Out-Null
+          $dll = Get-ChildItem build\libusb1 -Recurse -Filter libusb-1.0.dll |
+            Where-Object { $_.FullName -match 'MS64|VS2022\\MS64|x64' } |
+            Select-Object -First 1
+          if (-not $dll) { $dll = Get-ChildItem build\libusb1 -Recurse -Filter libusb-1.0.dll | Select-Object -First 1 }
+          if (-not $dll) { throw "libusb-1.0.dll not found" }
+          Copy-Item $dll.FullName wattbike_logger\resources\windows\libusb-1.0.dll -Force
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          Copy-Item wattbike_logger\resources\windows\wdi-simple.exe out\wdi-simple.exe -Force
+          Get-Item wattbike_logger\resources\windows\wdi-simple.exe, wattbike_logger\resources\windows\libusb-1.0.dll | Format-Table Name, Length
 
       - name: Install dependencies
         run: |

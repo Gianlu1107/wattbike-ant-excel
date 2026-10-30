@@ -8,7 +8,8 @@ from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
 
-datas = [("wattbike_logger/resources", "wattbike_logger/resources")]
+# Destinazione "resources/" così _resource_path("resources", ...) funziona anche frozen
+datas = [("wattbike_logger/resources", "resources")]
 binaries = []
 
 # macOS/Linux: includi libusb se presente sul runner di build (plug-and-play)
@@ -151,8 +152,8 @@ if is_macos:
         info_plist={
             "CFBundleName": "Wattbike Logger",
             "CFBundleDisplayName": "Wattbike Logger",
-            "CFBundleShortVersionString": "1.4.2",
-            "CFBundleVersion": "1.4.2",
+            "CFBundleShortVersionString": "1.4.3",
+            "CFBundleVersion": "1.4.3",
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "12.0",
             "NSAppleEventsUsageDescription": "Wattbike Logger",
