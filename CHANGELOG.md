@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.7
+
+- CI: URL libusb Windows corretto (`v1.0.30`); download DLL non blocca se fallisce
+
 ## 1.4.6
 
 - CI: `wdi-simple` OK; `libusb-1.0.dll` opzionale (non blocca più la release Windows)
