@@ -792,14 +792,21 @@ def _ensure_windows(on_status: StatusFn | None) -> DriverStatus:
     wdi_lines: list[str] = []
     if wdi is not None:
         wdi_ps = str(wdi).replace("'", "''")
+        # libwdi estrae in ./usb_driver: se esiste un FILE omoimo → Access denied (-3/-11).
+        # Usa sempre una cartella dedicata sotto AppData.
+        extract_dir = work / "usb_driver_out"
+        extract_dir.mkdir(parents=True, exist_ok=True)
+        extract_ps = str(extract_dir).replace("'", "''")
         wdi_lines.append(f"$wdi = '{wdi_ps}'")
+        wdi_lines.append(f"$wdiDest = '{extract_ps}'")
+        wdi_lines.append("if (Test-Path $wdiDest) { Remove-Item -LiteralPath $wdiDest -Recurse -Force -ErrorAction SilentlyContinue }")
+        wdi_lines.append("New-Item -ItemType Directory -Force -Path $wdiDest | Out-Null")
+        wdi_lines.append("Set-Location -LiteralPath (Split-Path $wdiDest -Parent)")
         wdi_lines.append("L 'Installazione driver di funzione via libwdi (come Zadig)…'")
-        # Array target: prova WinUSB (0) poi libusb-win32 (1) per ogni stick collegata
+        # Nome senza spazi (schtasks/cmdline); PID reale dalla stick collegata
         items = ", ".join(
-            "@{{Pid='0x{pid:04X}'; Name='{name}'}}".format(
-                pid=pid, name=name.replace("'", "''")
-            )
-            for pid, name in targets
+            "@{{Pid='0x{pid:04X}'; Name='ANTUSB'}}".format(pid=pid)
+            for pid, _name in targets
         )
         wdi_lines += [
             f"$targets = @({items})",
@@ -808,9 +815,11 @@ def _ensure_windows(on_status: StatusFn | None) -> DriverStatus:
             "  foreach ($dtype in @(0,1)) {",
             "    $label = if ($dtype -eq 0) { 'WinUSB' } else { 'libusb-win32' }",
             "    L ('  ' + $t.Name + ' PID=' + $t.Pid + ' → ' + $label + '…')",
+            "    if (Test-Path $wdiDest) { Remove-Item -LiteralPath $wdiDest -Recurse -Force -ErrorAction SilentlyContinue }",
+            "    New-Item -ItemType Directory -Force -Path $wdiDest | Out-Null",
             "    $p = Start-Process -FilePath $wdi -ArgumentList @(",
             "      '--name', $t.Name, '--vid', '0x0FCF', '--pid', $t.Pid,",
-            "      '--type', \"$dtype\", '--silent', '--timeout', '120000'",
+            "      '--type', \"$dtype\", '--dest', $wdiDest, '--silent', '--timeout', '180000'",
             "    ) -Wait -PassThru -WindowStyle Hidden",
             "    L ('    exit=' + $p.ExitCode)",
             "    if ($p.ExitCode -eq 0) { $ok = $true; break }",

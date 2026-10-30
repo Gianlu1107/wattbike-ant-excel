@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.8
+
+- Windows: `wdi-simple` usa `--dest` in AppData (evita Access denied su cartella `usb_driver` in conflitto)
+
 ## 1.4.7
 
 - CI: URL libusb Windows corretto (`v1.0.30`); download DLL non blocca se fallisce
