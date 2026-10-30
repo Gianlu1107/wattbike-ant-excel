@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.4
+
+- Fix build CI di `wdi-simple` (MSBuild quoting / config.h paths)
+
 ## 1.4.3
 
 - Windows: `pnputil` con INF non firmati fallisce (`0xE000022F`) — installazione via **libwdi/wdi-simple** (come Zadig), silenziosa
