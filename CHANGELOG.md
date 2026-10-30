@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.10
+
+- Vendor `wdi-simple.exe` + `libusb-1.0.dll` in resources (CI Windows affidabile)
+
 ## 1.4.9
 
 - Comando `diagnose` (JSON su file) per verificare chiavetta da remoto/CI

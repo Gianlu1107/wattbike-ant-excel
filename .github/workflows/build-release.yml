@@ -67,37 +67,36 @@ jobs:
           choco install innosetup -y --no-progress
           choco install 7zip.portable -y --no-progress
 
-      - name: Build wdi-simple + libusb-1.0.dll (Windows)
+      - name: Ensure wdi-simple + libusb-1.0.dll (Windows)
         if: matrix.libusb == 'windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path wattbike_logger\resources\windows, build, build\libusb1, out | Out-Null
-          powershell -ExecutionPolicy Bypass -File scripts\windows\build_wdi_simple.ps1
+          # Preferisci binari già in repo (build libwdi è fragile su runner)
           if (-not (Test-Path wattbike_logger\resources\windows\wdi-simple.exe)) {
-            throw "wdi-simple.exe missing after build"
+            Write-Host "wdi-simple missing in resources — building..."
+            powershell -ExecutionPolicy Bypass -File scripts\windows\build_wdi_simple.ps1
+          } else {
+            Write-Host "Using vendored wdi-simple.exe"
+          }
+          if (-not (Test-Path wattbike_logger\resources\windows\wdi-simple.exe)) {
+            throw "wdi-simple.exe missing"
           }
           Copy-Item wattbike_logger\resources\windows\wdi-simple.exe out\wdi-simple.exe -Force
-          # libusb-1.0.dll for WinUSB backend (best-effort)
-          try {
-            $zip = "build\libusb-binaries.7z"
-            curl.exe -fsSL --retry 5 -o $zip "https://github.com/libusb/libusb/releases/download/v1.0.30/libusb-1.0.30.7z"
-            & 7z x $zip "-obuild\libusb1" -y | Out-Host
-            Get-ChildItem build\libusb1 -Recurse -Filter "libusb-1.0.dll" | Select-Object -First 20 FullName
-            $dll = Get-ChildItem build\libusb1 -Recurse -Filter "libusb-1.0.dll" |
-              Where-Object { $_.FullName -match 'MS64|VS2019|VS2022|x64|amd64' } |
-              Select-Object -First 1
-            if (-not $dll) {
-              $dll = Get-ChildItem build\libusb1 -Recurse -Filter "libusb-1.0.dll" | Select-Object -First 1
-            }
-            if ($dll) {
-              Copy-Item $dll.FullName wattbike_logger\resources\windows\libusb-1.0.dll -Force
-              Copy-Item $dll.FullName out\libusb-1.0.dll -Force
-              Write-Host "Bundled $($dll.FullName)"
-            } else {
-              Write-Warning "libusb-1.0.dll not in archive"
-            }
-          } catch {
-            Write-Warning "libusb-1.0.dll skip: $_"
+          if (-not (Test-Path wattbike_logger\resources\windows\libusb-1.0.dll)) {
+            try {
+              $zip = "build\libusb-binaries.7z"
+              curl.exe -fsSL --retry 5 -o $zip "https://github.com/libusb/libusb/releases/download/v1.0.30/libusb-1.0.30.7z"
+              & 7z x $zip "-obuild\libusb1" -y | Out-Host
+              $dll = Get-ChildItem build\libusb1 -Recurse -Filter "libusb-1.0.dll" |
+                Where-Object { $_.FullName -match 'MS64|VS2019|VS2022|x64|amd64' } |
+                Select-Object -First 1
+              if (-not $dll) { $dll = Get-ChildItem build\libusb1 -Recurse -Filter "libusb-1.0.dll" | Select-Object -First 1 }
+              if ($dll) { Copy-Item $dll.FullName wattbike_logger\resources\windows\libusb-1.0.dll -Force }
+            } catch { Write-Warning "libusb-1.0.dll skip: $_" }
+          }
+          if (Test-Path wattbike_logger\resources\windows\libusb-1.0.dll) {
+            Copy-Item wattbike_logger\resources\windows\libusb-1.0.dll out\libusb-1.0.dll -Force
           }
           Get-ChildItem wattbike_logger\resources\windows | Format-Table Name, Length
 
