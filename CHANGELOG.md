@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.4
+
+- BLE: max frequenza sui payload nuovi; dedup solo spam identico; zeri a riposo ~4 Hz
+- Cadenza BLE non azzerata sui glitch CSC se stai ancora spingendo
+- ANT: dedup solo ritrasmissioni bit-identiche (event_count+raw)
+
 ## 1.5.3
 
 - macOS `.app`: `CFBundleShortVersionString` preso da `__version__` (non più fisso 1.4.10)

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wattbike-logger"
-version = "1.5.3"
+version = "1.5.4"
 
 description = "Wattbike ANT+ / Bluetooth LE logger → Excel/CSV with desktop GUI"
 readme = "README.md"

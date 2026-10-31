@@ -310,8 +310,11 @@ class BleWattbikeSession:
         self._crank_prev: tuple[int, int] | None = None
         self._last_cadence: float | None = None
         self._last_raw: bytes | None = None
+        self._last_emit_mono: float = 0.0
         self._event_seq = 0
         self._lock = threading.Lock()
+        # Zeri riammessi a ≤4 Hz se il firmware rinotifica lo stesso payload a riposo
+        self._zero_reemit_s = 0.25
 
     def _status(self, msg: str) -> None:
         if self.on_status:
@@ -334,6 +337,8 @@ class BleWattbikeSession:
             self._started_at = time.time()
             self._crank_prev = None
             self._last_raw = None
+            self._last_emit_mono = 0.0
+            self._last_cadence = None
             self._event_seq = 0
             self.capturing = True
 
@@ -410,14 +415,21 @@ class BleWattbikeSession:
 
         def on_cpm(_handle: int, data: bytearray) -> None:
             raw = bytes(data)
-            # Dedup: la Wattbike rinotifica lo stesso CPS molte volte di seguito
-            if self._last_raw is not None and raw == self._last_raw:
-                return
-            self._last_raw = raw
-
+            now = time.monotonic()
             decoded = parse_cycling_power_measurement(raw)
             if not decoded:
                 return
+            power = int(decoded.get("instantaneous_power_w") or 0)
+
+            # Dedup payload identici (spam Wattbike):
+            # - raw diverso → emetti (max frequenza)
+            # - raw uguale e W>0 → scarta
+            # - raw uguale e W==0 → riammetti ogni ~0.25s (zeri a riposo)
+            if self._last_raw is not None and raw == self._last_raw:
+                if power > 0:
+                    return
+                if (now - self._last_emit_mono) < self._zero_reemit_s:
+                    return
 
             if "crank_revs" in decoded and "crank_event_time" in decoded:
                 cad, self._crank_prev = cadence_from_crank(
@@ -429,8 +441,11 @@ class BleWattbikeSession:
                     self._last_cadence = cad
 
             cadence = self._last_cadence
-            if decoded.get("instantaneous_power_w") == 0 and cadence is None:
+            if power == 0:
                 cadence = 0.0
+            elif cadence is None or cadence == 0:
+                # CSC in ritardo: non azzerare cadenza se stai ancora spingendo
+                cadence = self._last_cadence if self._last_cadence not in (None, 0) else cadence
             enrich_kinematics(decoded, cadence)
 
             self._event_seq = (self._event_seq + 1) & 0xFF
@@ -439,6 +454,8 @@ class BleWattbikeSession:
                 ev = self._event_seq
 
             did = self.device_id or self.resolved_device_id or 0
+            self._last_raw = raw
+            self._last_emit_mono = now
             emit(
                 make_ble_row(
                     device_id=did,

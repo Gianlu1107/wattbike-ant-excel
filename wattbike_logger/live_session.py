@@ -59,6 +59,7 @@ class LiveSession:
         self._meter: PowerMeter | None = None
         self._error: str | None = None
         self._ble = None
+        self._last_ant_key: tuple[Any, ...] | None = None
 
     def _notify_device(self, device_id: int, device_type: int | None) -> None:
         if self.found_device_id is None:
@@ -73,6 +74,18 @@ class LiveSession:
     def _emit_row(self, row: dict[str, Any]) -> None:
         if not row_has_metrics(row):
             return
+        # Dedup solo ritrasmissioni ANT identiche (stesso event_count + raw).
+        # Ogni event_count nuovo passa → massima frequenza utile; zeri inclusi.
+        if row.get("source", "ant+") == "ant+":
+            key = (
+                row.get("device_id"),
+                row.get("page"),
+                row.get("event_count"),
+                row.get("raw_bytes_hex"),
+            )
+            if key == self._last_ant_key:
+                return
+            self._last_ant_key = key
         with self._lock:
             if not self.capturing:
                 return
@@ -246,6 +259,7 @@ class LiveSession:
         with self._lock:
             self.rows = []
             self._seen_events.clear()
+            self._last_ant_key = None
             self._started_at = time.time()
             self.capturing = True
         if self._ble is not None:
