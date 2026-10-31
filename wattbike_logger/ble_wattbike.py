@@ -155,18 +155,16 @@ def parse_cycling_power_measurement(data: bytes) -> dict[str, Any]:
         off += 1
         pct = bal_raw / 2.0  # unità 1/2 %
         out["pedal_balance_pct"] = pct
-        # bit1 = reference (1=left). Allinea ad ANT page 0x10: % sul destro se ref unknown/right.
+        # Wattbike BLE balance è specchiato rispetto ad ANT page 0x10 (verificato dual capture).
+        # Mappiamo L/R come ANT: pedale % sul destro (byte ANT bit7), lato opposto = resto.
         if power == 0:
             out["left_power_w"] = 0
             out["right_power_w"] = 0
-        elif flags & 0x02:  # left reference
+        else:
+            # Empirico vs dual capture: % BLE ≈ sinistro ANT (non destro SIG "naive").
             left = int(round(power * pct / 100.0))
             out["left_power_w"] = left
             out["right_power_w"] = power - left
-        else:
-            right = int(round(power * pct / 100.0))
-            out["right_power_w"] = right
-            out["left_power_w"] = power - right
 
     if flags & 0x04 and off + 2 <= len(data):  # Accumulated Torque
         out["accum_torque"] = struct.unpack_from("<H", data, off)[0]

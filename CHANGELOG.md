@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.2
+
+- BLE L/R allineati ad ANT+ (balance Wattbike era specchiato)
+
 ## 1.5.1
 
 - BLE: stessi campi ANT+ (cadenza CSC, L/R, media, coppia, ω); zeri a riposo

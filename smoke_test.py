@@ -34,7 +34,7 @@ def main() -> None:
     ble = parse_cycling_power_measurement(bytes.fromhex("094f560059720a520018006e000b0300"))
     assert ble["instantaneous_power_w"] == 86
     assert ble["average_power_w"] == 86
-    assert ble["right_power_w"] == 38 and ble["left_power_w"] == 48  # 44.5% right
+    assert ble["left_power_w"] == 38 and ble["right_power_w"] == 48  # 44.5% → L (allineato ANT)
     enrich_kinematics(ble, 75.0)
     assert ble["cadence_rpm"] == 75
     assert ble["torque_nm"] is not None and ble["angular_velocity_rad_s"] is not None
