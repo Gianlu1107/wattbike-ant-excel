@@ -64,6 +64,17 @@ try:
 except Exception:
     pass
 
+try:
+    hiddenimports += collect_submodules("bleak")
+except Exception:
+    pass
+try:
+    import bleak  # noqa: F401
+
+    hiddenimports += ["bleak", "bleak.backends", "bleak.exc"]
+except Exception:
+    pass
+
 excludes = [
     "matplotlib",
     "mpl_toolkits",

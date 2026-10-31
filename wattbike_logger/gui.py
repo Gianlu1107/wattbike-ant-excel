@@ -57,10 +57,12 @@ class WattbikeApp(tk.Tk):
         self._power_sum = 0.0
         self._t0: float | None = None
         self._stick_ready = False
+        self._ble_ready = False
         self._busy = False  # countdown / driver install / update
         self._driver_fix_attempted = False
         self._last_stick_present = False
         self._driver_logging = False
+        self._ble_poll_tick = 0
 
         self._build_style()
         self._build_ui()
@@ -120,6 +122,14 @@ class WattbikeApp(tk.Tk):
         self.ent_device = ttk.Entry(opts, textvariable=self.var_device, width=10)
         self.ent_device.pack(side=tk.LEFT, padx=6)
         ttk.Label(opts, text="(0 = auto / qualsiasi)").pack(side=tk.LEFT)
+        self.var_ble = tk.BooleanVar(value=True)
+        self.chk_ble = ttk.Checkbutton(
+            opts,
+            text="Anche Bluetooth",
+            variable=self.var_ble,
+            command=self._update_start_enabled,
+        )
+        self.chk_ble.pack(side=tk.LEFT, padx=(16, 0))
         self.lbl_detected = ttk.Label(opts, text="", style="Status.TLabel")
         self.lbl_detected.pack(side=tk.LEFT, padx=12)
 
@@ -381,7 +391,8 @@ class WattbikeApp(tk.Tk):
         if self._recording or self._countdown_job or self._busy:
             self.btn_start.configure(state=tk.DISABLED)
             return
-        self.btn_start.configure(state=tk.NORMAL if self._stick_ready else tk.DISABLED)
+        can = self._stick_ready or (bool(self.var_ble.get()) and self._ble_ready)
+        self.btn_start.configure(state=tk.NORMAL if can else tk.DISABLED)
 
     def _poll_queues(self) -> None:
         try:
@@ -504,15 +515,16 @@ class WattbikeApp(tk.Tk):
             on_row=lambda r: self._row_queue.put(r),
             on_status=lambda s: self._status_queue.put(s),
             on_device=on_device,
+            use_ble=bool(self.var_ble.get()),
         )
 
         def prep() -> None:
             try:
                 assert self._session is not None
                 self._session.open_stick()
-                self._status_queue.put("Chiavetta OK — countdown")
+                self._status_queue.put("Radio OK — countdown")
             except Exception as exc:
-                self._status_queue.put(f"Errore ANT+: {exc}")
+                self._status_queue.put(f"Errore ANT+/BLE: {exc}")
                 self.after(0, lambda: self._abort_start(str(exc)))
 
         threading.Thread(target=prep, daemon=True, name="ant-prep").start()
@@ -659,7 +671,6 @@ class WattbikeApp(tk.Tk):
     def _apply_driver_status(self, st: Any, *, announce: bool = True) -> None:
         present = bool(st.stick_present)
         accessible = bool(getattr(st, "stick_accessible", False) or st.accessible)
-        # Start solo quando la chiavetta è presente E apribile da openant
         self._stick_ready = present and accessible
         self._update_start_enabled()
         if announce and not self._recording and not self._countdown_job:
@@ -674,6 +685,10 @@ class WattbikeApp(tk.Tk):
                         detail = f"{detail}  [USB PID {pids}]"
                 except Exception:
                     pass
+            if self._ble_ready and not self._stick_ready:
+                detail = "Wattbike Bluetooth pronta — puoi premere Start (Anche Bluetooth)."
+            elif self._ble_ready and self._stick_ready:
+                detail = f"{detail}  (+ Bluetooth)"
             self._set_status(detail)
 
     def _bootstrap_drivers_async(self) -> None:
@@ -729,7 +744,7 @@ class WattbikeApp(tk.Tk):
         threading.Thread(target=worker, daemon=True, name="driver-repair").start()
 
     def _poll_stick_presence(self) -> None:
-        """Hotplug: rileva collegamento/scollegamento chiavetta ogni secondo."""
+        """Hotplug: chiavetta ANT + (ogni ~8s) Wattbike Bluetooth."""
         if not self._recording and not self._countdown_job and not self._busy:
 
             def worker() -> None:
@@ -741,7 +756,6 @@ class WattbikeApp(tk.Tk):
                     was_present = self._last_stick_present
                     self._last_stick_present = bool(st.stick_present)
                     self._apply_driver_status(st)
-                    # Appena collegata e non accessibile → ripara in automatico
                     if (
                         st.stick_present
                         and not was_present
@@ -753,6 +767,37 @@ class WattbikeApp(tk.Tk):
                 self.after(0, apply)
 
             threading.Thread(target=worker, daemon=True, name="stick-poll").start()
+
+            self._ble_poll_tick += 1
+            if self._ble_poll_tick % 8 == 1:
+
+                def ble_worker() -> None:
+                    try:
+                        from .ble_wattbike import bleak_available, discover_wattbikes_sync
+
+                        if not bleak_available():
+                            return
+                        found = discover_wattbikes_sync(5.0)
+                        names = ", ".join(d.name for d in found[:3])
+
+                        def apply_ble() -> None:
+                            self._ble_ready = bool(found)
+                            self._update_start_enabled()
+                            if found and not self._recording and not self._countdown_job:
+                                if not self._stick_ready:
+                                    self._set_status(
+                                        f"Wattbike BLE: {names} — Start con «Anche Bluetooth»"
+                                    )
+                                else:
+                                    self.lbl_detected.configure(
+                                        text=(self.lbl_detected.cget("text") + f"  BLE:{names}").strip()
+                                    )
+
+                        self.after(0, apply_ble)
+                    except Exception:
+                        pass
+
+                threading.Thread(target=ble_worker, daemon=True, name="ble-poll").start()
         self.after(1000, self._poll_stick_presence)
 
     def _after_driver_install(

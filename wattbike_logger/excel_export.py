@@ -12,6 +12,7 @@ from openpyxl.styles import Font
 COLUMNS: Sequence[str] = (
     "timestamp_iso",
     "elapsed_s",
+    "source",
     "device_id",
     "device_type",
     "device_type_name",
@@ -63,7 +64,7 @@ def write_xlsx(path: Path, rows: Iterable[dict[str, Any]], meta: dict[str, Any] 
     payload = {
         "exported_at": datetime.now().isoformat(timespec="seconds"),
         "rows": count,
-        "note": "Dati ANT+ Power/FE con watt (pagine info e S&C esclusi).",
+        "note": "Dati ANT+ e/o Bluetooth LE (CPS) con watt.",
         **(meta or {}),
     }
     for key, value in payload.items():

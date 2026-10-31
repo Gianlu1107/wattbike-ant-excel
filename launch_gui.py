@@ -11,7 +11,7 @@ def _silence_console_when_frozen() -> None:
     if not getattr(sys, "frozen", False):
         return
     cli = any(
-        a in ("setup-drivers", "diagnose", "scan", "record", "demo", "--help", "-h")
+        a in ("setup-drivers", "diagnose", "scan", "ble-scan", "record", "demo", "--help", "-h")
         for a in sys.argv[1:]
     )
     if cli:

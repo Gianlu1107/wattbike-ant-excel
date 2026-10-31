@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.0
+
+- Bluetooth LE in parallelo all'ANT+: CPS/CSC della Wattbike Pro/Trainer (stesso flusso Hub/Zwift)
+- GUI: checkbox «Anche Bluetooth»; Start anche solo-BLE se la bici è in radio
+- CLI: `ble-scan`, `record --ble`; colonna Excel `source` (`ant+` / `ble`)
+
 ## 1.4.10
 
 - Vendor `wdi-simple.exe` + `libusb-1.0.dll` in resources (CI Windows affidabile)

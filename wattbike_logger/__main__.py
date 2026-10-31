@@ -34,25 +34,84 @@ def cmd_scan(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ble_scan(args: argparse.Namespace) -> int:
+    from .ble_wattbike import bleak_available, discover_wattbikes_sync
+
+    if not bleak_available():
+        print("Installa bleak: pip install bleak")
+        return 2
+    devices = discover_wattbikes_sync(timeout_s=args.timeout)
+    if not devices:
+        print("Nessuna Wattbike BLE trovata. Accendi il monitor e riprova.")
+        return 1
+    for d in devices:
+        ant = f" ant_id={d.ant_device_id}" if d.ant_device_id else ""
+        print(f"{d.name}  addr={d.address}  rssi={d.rssi}{ant}")
+    return 0
+
+
 def cmd_record(args: argparse.Namespace) -> int:
     out = Path(args.output) if args.output else _default_output("wattbike")
     dedupe = args.unique_events
-    recorder = SessionRecorder(
-        device_id=args.device_id,
-        mode=args.mode,
-        quiet=args.quiet,
-        dedupe_events=dedupe,
-    )
-    try:
-        rows = recorder.run(duration_s=args.duration)
-    except Exception as exc:
-        print(f"Errore ANT+/USB: {exc}", file=sys.stderr)
-        print(
-            "Controlla chiavetta (scollega/ricollega), chiudi Zwift/altri app ANT, "
-            "e riprova. Su macOS a volte serve ristaccare dopo un timeout.",
-            file=sys.stderr,
+    use_ble = bool(getattr(args, "ble", False))
+
+    if use_ble:
+        from .live_session import LiveSession
+
+        rows: list = []
+        session = LiveSession(
+            device_id=args.device_id,
+            mode=args.mode,
+            use_ble=True,
+            on_row=None if args.quiet else (lambda r: print(
+                f"[{r.get('source','?'):4}] {r.get('instantaneous_power_w')} W  "
+                f"cad={r.get('cadence_rpm')}"
+            )),
+            on_status=None if args.quiet else print,
         )
-        return 2
+        try:
+            session.open_stick()
+            session.begin_capture()
+            duration = args.duration if args.duration is not None else 1e9
+            t_end = __import__("time").time() + duration
+            try:
+                while __import__("time").time() < t_end:
+                    __import__("time").sleep(0.25)
+            except KeyboardInterrupt:
+                print("\nStop.")
+            rows = session.stop()
+            if dedupe:
+                from .recorder import filter_metric_rows
+
+                rows = filter_metric_rows(rows, dedupe_events=True)
+        except Exception as exc:
+            print(f"Errore ANT+/BLE: {exc}", file=sys.stderr)
+            try:
+                session.stop()
+            except Exception:
+                pass
+            return 2
+        found_id = session.found_device_id
+        source_label = "Wattbike ANT+ + Bluetooth LE (CPS)"
+    else:
+        recorder = SessionRecorder(
+            device_id=args.device_id,
+            mode=args.mode,
+            quiet=args.quiet,
+            dedupe_events=dedupe,
+        )
+        try:
+            rows = recorder.run(duration_s=args.duration)
+        except Exception as exc:
+            print(f"Errore ANT+/USB: {exc}", file=sys.stderr)
+            print(
+                "Controlla chiavetta (scollega/ricollega), chiudi Zwift/altri app ANT, "
+                "e riprova. Su macOS a volte serve ristaccare dopo un timeout.",
+                file=sys.stderr,
+            )
+            return 2
+        found_id = recorder.found_device_id
+        source_label = "Wattbike ANT+ Bicycle Power (openant)"
 
     if not rows:
         print("Nessun pacchetto ricevuto: file non creato.")
@@ -60,11 +119,11 @@ def cmd_record(args: argparse.Namespace) -> int:
 
     stats = timing_stats(rows)
     meta = {
-        "mode": f"live/{args.mode}",
+        "mode": f"live/{args.mode}" + ("+ble" if use_ble else ""),
         "requested_device_id": args.device_id,
-        "found_device_id": recorder.found_device_id,
+        "found_device_id": found_id,
         "duration_s_requested": args.duration,
-        "source": "Wattbike ANT+ Bicycle Power (openant)",
+        "source": source_label,
         "timing_stats_json": json.dumps(stats, ensure_ascii=False),
         "power_hz": (stats.get("standard_power") or {}).get("hz"),
         "power_median_dt_s": (stats.get("standard_power") or {}).get("median_dt_s"),
@@ -198,6 +257,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_scan.add_argument("--timeout", type=float, default=20.0, help="Secondi di scansione")
     p_scan.set_defaults(func=cmd_scan)
 
+    p_ble = sub.add_parser("ble-scan", help="Cerca la Wattbike via Bluetooth LE")
+    p_ble.add_argument("--timeout", type=float, default=10.0, help="Secondi di scansione BLE")
+    p_ble.set_defaults(func=cmd_ble_scan)
+
     p_rec = sub.add_parser("record", help="Registra sessione live → Excel (CLI)")
     p_rec.add_argument(
         "--device-id",
@@ -227,6 +290,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_rec.add_argument("--quiet", action="store_true", help="Meno output a schermo")
     p_rec.add_argument("--csv", action="store_true", help="Scrive anche un .csv accanto all'xlsx")
+    p_rec.add_argument(
+        "--ble",
+        action="store_true",
+        help="Registra anche Bluetooth LE (CPS) in parallelo all'ANT+",
+    )
     p_rec.set_defaults(func=cmd_record)
 
     p_demo = sub.add_parser("demo", help="Genera Excel di prova senza hardware")

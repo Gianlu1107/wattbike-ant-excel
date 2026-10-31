@@ -1,3 +1,3 @@
-"""Registratore dati ANT+ Wattbike Pro/Trainer → Excel."""
+"""Registratore dati ANT+ / Bluetooth LE Wattbike Pro/Trainer → Excel."""
 
-__version__ = "1.4.10"
+__version__ = "1.5.0"

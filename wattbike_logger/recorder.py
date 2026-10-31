@@ -110,6 +110,11 @@ _decode_power_page = _decode_payload
 
 def row_has_metrics(row: dict[str, Any]) -> bool:
     """True se la riga ha potenza (e di solito cadenza) usabile in analisi."""
+    if row.get("source") == "ble":
+        # CPS: potenza (anche 0 a riposo). Escludi solo pacchetti proprietari grezzi.
+        if row.get("page") == "ble_prop":
+            return False
+        return row.get("instantaneous_power_w") is not None
     return row.get("instantaneous_power_w") is not None and row.get("page") in DATA_PAGES
 
 
@@ -163,6 +168,8 @@ def make_row(
         "torque_nm": decoded.get("torque_nm"),
         "angular_velocity_rad_s": decoded.get("angular_velocity_rad_s"),
         "raw_bytes_hex": _bytes_to_hex(raw),
+        "source": "ant+",
+        "source_detail": "ant_power",
     }
 
 

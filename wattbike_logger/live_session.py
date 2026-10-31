@@ -36,12 +36,16 @@ class LiveSession:
         on_row: Callable[[dict[str, Any]], None] | None = None,
         on_status: Callable[[str], None] | None = None,
         on_device: Callable[[int, str], None] | None = None,
+        use_ble: bool = False,
+        ble_address: str | None = None,
     ):
         self.device_id = device_id  # 0 = qualsiasi PowerMeter
         self.mode = mode
         self.on_row = on_row
         self.on_status = on_status
         self.on_device = on_device
+        self.use_ble = use_ble
+        self.ble_address = ble_address
         self.rows: list[dict[str, Any]] = []
         self.found_device_id: int | None = None
         self.capturing = False
@@ -54,6 +58,7 @@ class LiveSession:
         self._use_paired = mode == "paired"
         self._meter: PowerMeter | None = None
         self._error: str | None = None
+        self._ble = None
 
     def _notify_device(self, device_id: int, device_type: int | None) -> None:
         if self.found_device_id is None:
@@ -75,25 +80,63 @@ class LiveSession:
         if self.on_row:
             self.on_row(row)
 
+    def _start_ble(self) -> None:
+        if not self.use_ble:
+            return
+        from .ble_wattbike import BleWattbikeSession, bleak_available
+
+        if not bleak_available():
+            self._status("Bluetooth: installa bleak (pip install bleak)")
+            return
+        ble = BleWattbikeSession(
+            address=self.ble_address,
+            device_id=self.device_id,
+            on_row=self._emit_row,
+            on_status=self._status,
+        )
+        self._ble = ble
+        ble.start()
+        if ble.resolved_device_id and self.found_device_id is None:
+            self._notify_device(ble.resolved_device_id, None)
+
     def open_stick(self) -> None:
-        """Inizializza ANT+ (chiamare durante il countdown). Blocca finché pronto o errore."""
+        """Inizializza ANT+ (+ BLE opzionale). Blocca finché pronto o errore."""
         self._error = None
+        ant_ok = False
         try:
             if self.mode == "scan":
                 try:
                     self._open_rx_scan()
-                    return
+                    ant_ok = True
                 except Exception as exc:
                     self._status(f"RX-scan fallito ({exc}), provo paired...")
                     SessionRecorder._safe_stop(self._node)
                     self._node = None
                     time.sleep(0.4)
-            self._open_paired()
+            if not ant_ok:
+                self._open_paired()
+                ant_ok = True
         except Exception as exc:
             self._error = str(exc)
             SessionRecorder._safe_stop(self._node)
             self._node = None
-            raise
+            if not self.use_ble:
+                raise
+            self._status(f"ANT+ non disponibile ({exc}); provo solo Bluetooth...")
+
+        try:
+            self._start_ble()
+        except Exception as exc:
+            if ant_ok:
+                self._status(f"Bluetooth non avviato: {exc}")
+            else:
+                self._error = str(exc)
+                raise
+
+        if ant_ok or (self._ble and getattr(self._ble, "connected", False)):
+            self._ready = True
+        elif not ant_ok:
+            raise RuntimeError(self._error or "Né ANT+ né Bluetooth disponibili")
 
     def _open_rx_scan(self) -> None:
         self._status("Apertura chiavetta ANT+ (RX-scan)...")
@@ -205,14 +248,22 @@ class LiveSession:
             self._seen_events.clear()
             self._started_at = time.time()
             self.capturing = True
+        if self._ble is not None:
+            self._ble.begin_capture()
         self._status("Registrazione in corso...")
 
     def stop(self) -> list[dict[str, Any]]:
-        """Ferma la radio e restituisce le righe catturate."""
+        """Ferma ANT+/BLE e restituisce le righe catturate."""
         with self._lock:
             self.capturing = False
             rows = list(self.rows)
-        self._status("Arresto chiavetta...")
+        self._status("Arresto...")
+        if self._ble is not None:
+            try:
+                self._ble.stop()
+            except Exception:
+                pass
+            self._ble = None
         SessionRecorder._safe_stop(self._node)
         self._node = None
         self._ready = False
