@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.1
+
+- BLE: stessi campi ANT+ (cadenza CSC, L/R, media, coppia, ω); zeri a riposo
+- Dedup notifiche CPS identiche (la Wattbike rinotificava lo stesso payload)
+
 ## 1.5.0
 
 - Bluetooth LE in parallelo all'ANT+: CPS/CSC della Wattbike Pro/Trainer (stesso flusso Hub/Zwift)

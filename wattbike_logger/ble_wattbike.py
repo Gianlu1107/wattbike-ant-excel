@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import re
 import struct
 import threading
@@ -33,7 +34,6 @@ class BleDeviceInfo:
 
 
 def _parse_ant_id_from_name(name: str) -> int | None:
-    # WattbikePM25054434 / WattbikePM54434
     m = re.search(r"(\d{4,6})$", name.strip())
     if not m:
         return None
@@ -74,7 +74,6 @@ async def discover_wattbikes(timeout_s: float = 8.0) -> list[BleDeviceInfo]:
                 ant_device_id=_parse_ant_id_from_name(name),
             )
         )
-    # Preferisci nome Wattbike
     out.sort(key=lambda d: (0 if "wattbike" in d.name.lower() else 1, -(d.rssi or -999)))
     return out
 
@@ -83,52 +82,166 @@ def discover_wattbikes_sync(timeout_s: float = 8.0) -> list[BleDeviceInfo]:
     return asyncio.run(discover_wattbikes(timeout_s))
 
 
-def parse_cycling_power_measurement(data: bytes) -> dict[str, Any]:
-    """Decodifica CPS Cycling Power Measurement (little-endian)."""
-    if len(data) < 4:
+def _bytes_to_hex(data: bytes) -> str:
+    return " ".join(f"{b:02X}" for b in data)
+
+
+def cadence_from_crank(
+    prev: tuple[int, int] | None, revs: int, event_time: int
+) -> tuple[float | None, tuple[int, int]]:
+    """Cadenza da crank revs / event time (1/1024 s). d_revs==0 → 0 rpm (fermo)."""
+    cur = (revs, event_time)
+    if prev is None:
+        return None, cur
+    d_revs = (revs - prev[0]) & 0xFFFF
+    d_t = (event_time - prev[1]) & 0xFFFF
+    if d_t == 0:
+        return 0.0 if d_revs == 0 else None, cur
+    if d_revs == 0:
+        return 0.0, cur
+    rpm = 60.0 * d_revs / (d_t / 1024.0)
+    if rpm < 0 or rpm > 300:
+        return None, cur
+    return round(rpm, 1), cur
+
+
+def parse_csc_measurement(data: bytes) -> dict[str, Any]:
+    if not data:
         return {}
-    flags = struct.unpack_from("<H", data, 0)[0]
-    power = struct.unpack_from("<h", data, 2)[0]
-    off = 4
-    out: dict[str, Any] = {
-        "flags": flags,
-        "instantaneous_power_w": int(power),
-        "page": "ble_cps",
-        "page_name": "ble_cycling_power",
-    }
-    if flags & 0x01 and off < len(data):  # pedal power balance
-        out["pedal_balance_pct"] = data[off] / 2.0
-        off += 1
-    if flags & 0x04 and off + 2 <= len(data):  # accumulated torque
-        out["accum_torque"] = struct.unpack_from("<H", data, off)[0]
-        off += 2
-    if flags & 0x10 and off + 6 <= len(data):  # wheel revs
+    flags = data[0]
+    off = 1
+    out: dict[str, Any] = {"flags": flags}
+    if flags & 0x01 and off + 6 <= len(data):
         revs, t = struct.unpack_from("<IH", data, off)
         out["wheel_revs"] = revs
         out["wheel_event_time"] = t
         off += 6
-    if flags & 0x20 and off + 4 <= len(data):  # crank revs
+    if flags & 0x02 and off + 4 <= len(data):
         revs, t = struct.unpack_from("<HH", data, off)
         out["crank_revs"] = revs
         out["crank_event_time"] = t
     return out
 
 
-def cadence_from_crank(
-    prev: tuple[int, int] | None, revs: int, event_time: int
-) -> tuple[float | None, tuple[int, int]]:
-    """Cadenza da crank revs / event time (1/1024 s)."""
-    cur = (revs, event_time)
-    if prev is None:
-        return None, cur
-    d_revs = (revs - prev[0]) & 0xFFFF
-    d_t = (event_time - prev[1]) & 0xFFFF
-    if d_t == 0 or d_revs == 0:
-        return None, cur
-    rpm = 60.0 * d_revs / (d_t / 1024.0)
-    if rpm < 0 or rpm > 300:
-        return None, cur
-    return round(rpm, 1), cur
+def parse_cycling_power_measurement(data: bytes) -> dict[str, Any]:
+    """
+    Decodifica CPS → stessi campi usati dalle righe ANT+ (watt, cadenza, L/R, …).
+    Wattbike Pro/Trainer espone tipicamente flags 0x4F09 (PPB + angoli + energy).
+    """
+    if len(data) < 4:
+        return {}
+    flags = struct.unpack_from("<H", data, 0)[0]
+    power = int(struct.unpack_from("<h", data, 2)[0])
+    # Clamp rumorosi negativi
+    if power < 0:
+        power = 0
+    off = 4
+    out: dict[str, Any] = {
+        "flags": flags,
+        "page": "ble_cps",
+        "page_name": "ble_cycling_power",
+        "instantaneous_power_w": power,
+        "average_power_w": power,
+        "cadence_rpm": None,
+        "left_power_w": None,
+        "right_power_w": None,
+        "torque_nm": None,
+        "angular_velocity_rad_s": None,
+        "event_count": None,
+    }
+
+    if flags & 0x01 and off < len(data):  # Pedal Power Balance Present
+        bal_raw = data[off]
+        off += 1
+        pct = bal_raw / 2.0  # unità 1/2 %
+        out["pedal_balance_pct"] = pct
+        # bit1 = reference (1=left). Allinea ad ANT page 0x10: % sul destro se ref unknown/right.
+        if power == 0:
+            out["left_power_w"] = 0
+            out["right_power_w"] = 0
+        elif flags & 0x02:  # left reference
+            left = int(round(power * pct / 100.0))
+            out["left_power_w"] = left
+            out["right_power_w"] = power - left
+        else:
+            right = int(round(power * pct / 100.0))
+            out["right_power_w"] = right
+            out["left_power_w"] = power - right
+
+    if flags & 0x04 and off + 2 <= len(data):  # Accumulated Torque
+        out["accum_torque"] = struct.unpack_from("<H", data, off)[0]
+        off += 2
+
+    if flags & 0x10 and off + 6 <= len(data):  # Wheel revs
+        revs, t = struct.unpack_from("<IH", data, off)
+        out["wheel_revs"] = revs
+        out["wheel_event_time"] = t
+        off += 6
+
+    if flags & 0x20 and off + 4 <= len(data):  # Crank revs
+        revs, t = struct.unpack_from("<HH", data, off)
+        out["crank_revs"] = revs
+        out["crank_event_time"] = t
+        off += 4
+
+    if flags & 0x40 and off + 4 <= len(data):
+        out["extreme_force_max"], out["extreme_force_min"] = struct.unpack_from("<hh", data, off)
+        off += 4
+    if flags & 0x80 and off + 4 <= len(data):
+        out["extreme_torque_max"], out["extreme_torque_min"] = struct.unpack_from("<hh", data, off)
+        off += 4
+    if flags & 0x100 and off + 2 <= len(data):
+        out["extreme_angles"] = struct.unpack_from("<H", data, off)[0]
+        off += 2
+    if flags & 0x200 and off + 2 <= len(data):
+        out["top_dead_spot"] = struct.unpack_from("<H", data, off)[0]
+        off += 2
+    if flags & 0x400 and off + 2 <= len(data):
+        out["bottom_dead_spot"] = struct.unpack_from("<H", data, off)[0]
+        off += 2
+    if flags & 0x800 and off + 2 <= len(data):
+        energy = struct.unpack_from("<H", data, off)[0]
+        out["accumulated_energy_kj"] = energy
+        out["event_count"] = energy & 0xFF
+        off += 2
+
+    # Alcuni firmware Wattbike lasciano 3 byte residuali (non standard)
+    if off + 3 <= len(data) and "crank_revs" not in out:
+        # prova crank uint16 + padding
+        maybe_revs = struct.unpack_from("<H", data, off)[0]
+        if maybe_revs or data[off : off + 3] != b"\x00\x00\x00":
+            out["crank_revs_guess"] = maybe_revs
+
+    return out
+
+
+def enrich_kinematics(decoded: dict[str, Any], cadence: float | None) -> dict[str, Any]:
+    """Riempie cadenza / ω / coppia come sulle righe ANT+."""
+    if cadence is not None:
+        cad_i = int(round(cadence))
+        decoded["cadence_rpm"] = cad_i
+        if cad_i > 0:
+            omega = cad_i * (2.0 * math.pi / 60.0)
+            decoded["angular_velocity_rad_s"] = round(omega, 4)
+            pwr = decoded.get("instantaneous_power_w")
+            if pwr is not None and omega > 0:
+                decoded["torque_nm"] = round(float(pwr) / omega, 3)
+        else:
+            decoded["angular_velocity_rad_s"] = 0.0
+            decoded["torque_nm"] = 0.0 if decoded.get("instantaneous_power_w") == 0 else decoded.get(
+                "torque_nm"
+            )
+    pwr = decoded.get("instantaneous_power_w")
+    if pwr == 0:
+        decoded["cadence_rpm"] = decoded.get("cadence_rpm") if decoded.get("cadence_rpm") is not None else 0
+        if decoded.get("cadence_rpm") == 0:
+            decoded["angular_velocity_rad_s"] = 0.0
+            decoded["torque_nm"] = 0.0
+        if decoded.get("left_power_w") is None:
+            decoded["left_power_w"] = 0
+        if decoded.get("right_power_w") is None:
+            decoded["right_power_w"] = 0
+    return decoded
 
 
 def make_ble_row(
@@ -138,17 +251,18 @@ def make_ble_row(
     started_at: float,
     decoded: dict[str, Any],
     source_detail: str = "ble_cps",
+    event_count: int | None = None,
 ) -> dict[str, Any]:
     now = time.time()
     return {
         "timestamp_iso": datetime.fromtimestamp(now).isoformat(timespec="milliseconds"),
         "elapsed_s": round(now - started_at, 3),
         "device_id": device_id,
-        "device_type": None,
-        "device_type_name": "WattbikeBLE",
+        "device_type": 11,  # stesso device type PowerMeter ANT+
+        "device_type_name": "PowerMeter",
         "page": decoded.get("page", "ble_cps"),
         "page_name": decoded.get("page_name", "ble_cycling_power"),
-        "event_count": decoded.get("crank_revs") or decoded.get("event_count"),
+        "event_count": event_count if event_count is not None else decoded.get("event_count"),
         "instantaneous_power_w": decoded.get("instantaneous_power_w"),
         "average_power_w": decoded.get("average_power_w"),
         "cadence_rpm": decoded.get("cadence_rpm"),
@@ -156,7 +270,7 @@ def make_ble_row(
         "right_power_w": decoded.get("right_power_w"),
         "torque_nm": decoded.get("torque_nm"),
         "angular_velocity_rad_s": decoded.get("angular_velocity_rad_s"),
-        "raw_bytes_hex": raw.hex(),
+        "raw_bytes_hex": _bytes_to_hex(raw),
         "source": "ble",
         "source_detail": source_detail,
     }
@@ -166,6 +280,7 @@ class BleWattbikeSession:
     """
     Connessione BLE in thread dedicato (asyncio).
     Compatibile con LiveSession ANT+: stesso on_row / capturing.
+    Deduplica notifiche CPS identiche (la Wattbike rinotifica lo stesso payload).
     """
 
     def __init__(
@@ -175,7 +290,7 @@ class BleWattbikeSession:
         device_id: int = 0,
         on_row: RowFn | None = None,
         on_status: StatusFn | None = None,
-        include_proprietary: bool = True,
+        include_proprietary: bool = False,
     ):
         self.address = address
         self.name_substr = name_substr
@@ -195,6 +310,9 @@ class BleWattbikeSession:
         self._ready = threading.Event()
         self._error: str | None = None
         self._crank_prev: tuple[int, int] | None = None
+        self._last_cadence: float | None = None
+        self._last_raw: bytes | None = None
+        self._event_seq = 0
         self._lock = threading.Lock()
 
     def _status(self, msg: str) -> None:
@@ -209,7 +327,6 @@ class BleWattbikeSession:
         self._error = None
         self._thread = threading.Thread(target=self._thread_main, daemon=True, name="ble-wattbike")
         self._thread.start()
-        # Attendi connect o timeout
         self._ready.wait(timeout=25.0)
         if self._error and not self.connected:
             raise RuntimeError(self._error)
@@ -218,6 +335,8 @@ class BleWattbikeSession:
         with self._lock:
             self._started_at = time.time()
             self._crank_prev = None
+            self._last_raw = None
+            self._event_seq = 0
             self.capturing = True
 
     def stop(self) -> None:
@@ -251,7 +370,6 @@ class BleWattbikeSession:
             self._status("Scansione Bluetooth Wattbike...")
             devices = await discover_wattbikes(10.0)
             if not devices:
-                # fallback: qualsiasi nome con substr
                 raw = await BleakScanner.discover(timeout=6.0, return_adv=True)
                 for a, (dev, adv) in raw.items():
                     n = (dev.name or adv.local_name or "") or ""
@@ -280,11 +398,29 @@ class BleWattbikeSession:
             if self.on_row:
                 self.on_row(row)
 
+        def on_csc(_handle: int, data: bytearray) -> None:
+            parsed = parse_csc_measurement(bytes(data))
+            if "crank_revs" not in parsed or "crank_event_time" not in parsed:
+                return
+            cad, self._crank_prev = cadence_from_crank(
+                self._crank_prev,
+                int(parsed["crank_revs"]),
+                int(parsed["crank_event_time"]),
+            )
+            if cad is not None:
+                self._last_cadence = cad
+
         def on_cpm(_handle: int, data: bytearray) -> None:
             raw = bytes(data)
+            # Dedup: la Wattbike rinotifica lo stesso CPS molte volte di seguito
+            if self._last_raw is not None and raw == self._last_raw:
+                return
+            self._last_raw = raw
+
             decoded = parse_cycling_power_measurement(raw)
             if not decoded:
                 return
+
             if "crank_revs" in decoded and "crank_event_time" in decoded:
                 cad, self._crank_prev = cadence_from_crank(
                     self._crank_prev,
@@ -292,7 +428,18 @@ class BleWattbikeSession:
                     int(decoded["crank_event_time"]),
                 )
                 if cad is not None:
-                    decoded["cadence_rpm"] = cad
+                    self._last_cadence = cad
+
+            cadence = self._last_cadence
+            if decoded.get("instantaneous_power_w") == 0 and cadence is None:
+                cadence = 0.0
+            enrich_kinematics(decoded, cadence)
+
+            self._event_seq = (self._event_seq + 1) & 0xFF
+            ev = decoded.get("event_count")
+            if ev is None:
+                ev = self._event_seq
+
             did = self.device_id or self.resolved_device_id or 0
             emit(
                 make_ble_row(
@@ -300,41 +447,28 @@ class BleWattbikeSession:
                     raw=raw,
                     started_at=self._started_at,
                     decoded=decoded,
-                )
-            )
-
-        def on_prop(_handle: int, data: bytearray) -> None:
-            raw = bytes(data)
-            did = self.device_id or self.resolved_device_id or 0
-            emit(
-                make_ble_row(
-                    device_id=did,
-                    raw=raw,
-                    started_at=self._started_at,
-                    decoded={
-                        "page": "ble_prop",
-                        "page_name": "ble_wattbike_proprietary",
-                        "instantaneous_power_w": None,
-                    },
-                    source_detail="ble_proprietary",
+                    event_count=int(ev),
                 )
             )
 
         self._status(f"Connessione BLE a {addr}...")
         async with BleakClient(addr, timeout=20.0) as client:
             self.connected = True
-            self._status("Bluetooth Wattbike connesso (CPS)")
+            self._status("Bluetooth Wattbike connesso (CPS+CSC)")
             self._ready.set()
             await client.start_notify(UUID_CPM, on_cpm)
             try:
-                await client.start_notify(UUID_CSC_MEAS, lambda h, d: None)
-            except Exception:
-                pass
+                await client.start_notify(UUID_CSC_MEAS, on_csc)
+            except Exception as exc:
+                self._status(f"BLE CSC non disponibile: {exc}")
             if self.include_proprietary:
                 try:
-                    await client.start_notify(UUID_WB_NOTIFY, on_prop)
-                except Exception as exc:
-                    self._status(f"BLE proprietario non sottoscritto: {exc}")
+                    await client.start_notify(
+                        UUID_WB_NOTIFY,
+                        lambda _h, d: None,
+                    )
+                except Exception:
+                    pass
 
             while not self._stop.is_set():
                 if not client.is_connected:
