@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.3
+
+- macOS `.app`: `CFBundleShortVersionString` preso da `__version__` (non più fisso 1.4.10)
+
 ## 1.5.2
 
 - BLE L/R allineati ad ANT+ (balance Wattbike era specchiato)

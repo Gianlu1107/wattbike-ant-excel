@@ -2,11 +2,19 @@
 """PyInstaller spec — Wattbike ANT+ Logger (lean; .app onedir su macOS)."""
 
 import os
+import re
 import sys
+from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
+
+_APP_VERSION = re.search(
+    r'__version__\s*=\s*"([^"]+)"',
+    Path("wattbike_logger/__init__.py").read_text(encoding="utf-8"),
+).group(1)
+
 
 # Destinazione "resources/" così _resource_path("resources", ...) funziona anche frozen
 datas = [("wattbike_logger/resources", "resources")]
@@ -163,8 +171,8 @@ if is_macos:
         info_plist={
             "CFBundleName": "Wattbike Logger",
             "CFBundleDisplayName": "Wattbike Logger",
-            "CFBundleShortVersionString": "1.4.10",
-            "CFBundleVersion": "1.4.10",
+            "CFBundleShortVersionString": _APP_VERSION,
+            "CFBundleVersion": _APP_VERSION,
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "12.0",
             "NSAppleEventsUsageDescription": "Wattbike Logger",
