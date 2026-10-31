@@ -168,11 +168,13 @@ def cmd_setup_drivers(args: argparse.Namespace) -> int:
 
     st = prepare_plug_and_play(on_status=log)
     log(st.detail)
-    if st.ok or st.backend_ready or st.accessible:
+    # Solo stick davvero usabile = successo. backend_ready da solo non basta:
+    # su Windows la stick può essere in FAILED_INSTALL con libusb.dll presente.
+    if st.stick_accessible:
         return 0
     st2 = ensure_drivers(on_status=log)
     log(st2.detail)
-    return 0 if (st2.ok or st2.backend_ready or st2.accessible) else 1
+    return 0 if st2.stick_accessible else 1
 
 
 def build_parser() -> argparse.ArgumentParser:

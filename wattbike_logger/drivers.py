@@ -374,9 +374,34 @@ def windows_stick_present() -> tuple[bool, str]:
     return False, ""
 
 
+def _windows_pnp_function_driver_ok() -> bool | None:
+    """
+    None = nessuna stick PnP (non usare come veto).
+    True = almeno una stick con Status OK e senza problem code.
+    False = stick vista ma senza driver di funzione (Error/Unknown/FAILED_INSTALL).
+    """
+    pnp = list_ant_pnp_devices()
+    if not pnp:
+        return None
+    for d in pnp:
+        problem = (d.problem or "").upper()
+        status = (d.status or "").upper()
+        if status == "OK" and problem in ("", "0", "CM_PROB_NONE"):
+            return True
+    return False
+
+
 def stick_accessible(timeout_s: float = 3.0) -> bool:
-    """True se openant trova un backend driver compatibile (con timeout)."""
+    """True se la chiavetta è davvero usabile (driver di funzione + backend libusb)."""
     configure_usb_backend()
+    # find_driver() dice solo che libusb è caricabile — NON che la stick ha un driver.
+    # Su Windows senza WinUSB/libusb0 la stick resta in Altri dispositivi / FAILED_INSTALL
+    # e openant poi si blocca su scan/start.
+    if sys.platform.startswith("win"):
+        pnp_ok = _windows_pnp_function_driver_ok()
+        if pnp_ok is False:
+            return False
+
     result = [False]
 
     def _run() -> None:
@@ -554,10 +579,13 @@ def prepare_plug_and_play(on_status: StatusFn | None = None) -> DriverStatus:
     """
     configure_usb_backend()
     st = diagnose()
+    if st.stick_accessible:
+        return st
+    # Stick presente ma non usabile (es. Altri dispositivi / FAILED_INSTALL) → installa subito
+    if st.stick_present and not st.stick_accessible and st.can_auto_install:
+        return ensure_drivers(on_status=on_status, interactive=False)
     # Backend già ok (anche senza stick) → non rilanciare brew/UAC
     if st.backend_ready and not st.can_auto_install:
-        return st
-    if st.stick_accessible:
         return st
     # Windows/Linux: prepara filtri/udev anche a tavolino; macOS solo se manca libusb
     if st.can_auto_install:
