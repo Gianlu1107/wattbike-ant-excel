@@ -35,123 +35,47 @@ from .prefs import (
 from .recorder import timing_stats
 from .updater import apply_update, check_latest_release, frozen_executable
 
-_UI_FONT = ("Segoe UI", 10) if sys.platform.startswith("win") else ("Helvetica", 10)
+_UI_FONT = ("Segoe UI", 10) if sys.platform.startswith("win") else ("Helvetica Neue", 10)
 _UI_FONT_BOLD = (_UI_FONT[0], 10, "bold")
-_UI_FONT_BIG = (_UI_FONT[0], 26, "bold")
-_UI_FONT_METRIC = (_UI_FONT[0], 18, "bold")
+_UI_FONT_BIG = (_UI_FONT[0], 24, "bold")
+_UI_FONT_METRIC = (_UI_FONT[0], 20, "bold")
+_UI_FONT_CARD = (_UI_FONT[0], 15, "bold")
 _UI_FONT_SMALL = (_UI_FONT[0], 9)
+_UI_FONT_SMALL_BOLD = (_UI_FONT[0], 8, "bold")
 _UI_FONT_AXIS = (_UI_FONT[0], 8)
 
 # Palette stile Windows classico
-_WIN_BG = "#f0f0f0"
+_WIN_BG = "#ece9d8"
 _PANEL_BG = "#ffffff"
-_CHART_BG = "#fafafa"
+_CHART_BG = "#ffffff"
 _CHART_PLOT = "#ffffff"
 _CHART_GRID = "#e6e6e6"
 _CHART_AXIS = "#555555"
-_CHART_BORDER = "#a0a0a0"
+_CHART_BORDER = "#b0aca0"
 _POWER_COLOR = "#c0392b"
 _CAD_COLOR = "#2471a3"
-
-
-def _create_app_icons() -> dict[str, tk.PhotoImage]:
-    """Genera icone 16x16 grafiche native (senza emoji) in puro Tkinter."""
-    icons: dict[str, tk.PhotoImage] = {}
-
-    # 1. Start (Freccia verde play classica)
-    img_start = tk.PhotoImage(width=16, height=16)
-    for y in range(2, 14):
-        dist = abs(y - 7.5)
-        w = int(12 - dist * 1.8)
-        for x in range(3, min(14, 3 + w)):
-            img_start.put("#1e8449", (x, y))
-    icons["start"] = img_start
-
-    # 2. Stop (Quadrato rosso classico)
-    img_stop = tk.PhotoImage(width=16, height=16)
-    for y in range(3, 13):
-        for x in range(3, 13):
-            img_stop.put("#c0392b", (x, y))
-    icons["stop"] = img_stop
-
-    # 3. Open (Cartella gialla Windows classica)
-    img_open = tk.PhotoImage(width=16, height=16)
-    for y in range(4, 6):
-        for x in range(2, 7):
-            img_open.put("#b7950b", (x, y))
-    for y in range(6, 14):
-        for x in range(2, 15):
-            img_open.put("#f1c40f", (x, y))
-    for x in range(2, 15):
-        img_open.put("#7d6608", (x, 13))
-    icons["open"] = img_open
-
-    # 4. Save (Floppy disk 3.5" blu Windows classico)
-    img_save = tk.PhotoImage(width=16, height=16)
-    for y in range(2, 14):
-        for x in range(2, 14):
-            img_save.put("#2980b9", (x, y))
-    for y in range(2, 7):
-        for x in range(5, 11):
-            img_save.put("#bdc3c7", (x, y))
-    for y in range(8, 13):
-        for x in range(4, 12):
-            img_save.put("#ffffff", (x, y))
-    icons["save"] = img_save
-
-    # 5. Chart / Monitor Live (Grafico a barre/linea classico)
-    img_chart = tk.PhotoImage(width=16, height=16)
-    for y in range(2, 14):
-        img_chart.put("#333333", (2, y))
-    for x in range(2, 14):
-        img_chart.put("#333333", (x, 13))
-    for y in range(8, 13):
-        img_chart.put("#2980b9", (4, y))
-        img_chart.put("#2980b9", (5, y))
-    for y in range(5, 13):
-        img_chart.put("#c0392b", (7, y))
-        img_chart.put("#c0392b", (8, y))
-    for y in range(3, 13):
-        img_chart.put("#27ae60", (10, y))
-        img_chart.put("#27ae60", (11, y))
-    icons["chart"] = img_chart
-
-    # 6. Report / Analisi (Foglio documento classico)
-    img_report = tk.PhotoImage(width=16, height=16)
-    for y in range(2, 14):
-        for x in range(3, 13):
-            img_report.put("#ffffff", (x, y))
-    for x in range(3, 13):
-        img_report.put("#7f8c8d", (x, 2))
-        img_report.put("#7f8c8d", (x, 13))
-    for y in range(2, 14):
-        img_report.put("#7f8c8d", (3, y))
-        img_report.put("#7f8c8d", (12, y))
-    for x in range(5, 11):
-        img_report.put("#2980b9", (x, 5))
-        img_report.put("#2980b9", (x, 8))
-        img_report.put("#2980b9", (x, 11))
-    icons["report"] = img_report
-
-    # 7. Driver / Setup (Ingranaggio / chiave inglese)
-    img_driver = tk.PhotoImage(width=16, height=16)
-    for y in range(3, 13):
-        img_driver.put("#555555", (y, y))
-        img_driver.put("#555555", (15 - y, y))
-    for x in range(5, 11):
-        for y in range(5, 11):
-            img_driver.put("#7f8c8d", (x, y))
-    icons["driver"] = img_driver
-
-    return icons
 
 
 class WattbikeApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(f"Wattbike ANT+ / BLE Analyzer & Logger — v{__version__}")
-        self.geometry("900x730")
-        self.minsize(800, 620)
+        self.geometry("920x740")
+        self.minsize(820, 640)
+
+        # Su macOS forza tema Light a livello di finestra Cocoa (evita dark mode ibrido illegibile)
+        if sys.platform == "darwin":
+            try:
+                from AppKit import NSApplication, NSAppearance, NSAppearanceNameAqua
+
+                app = NSApplication.sharedApplication()
+                aqua = NSAppearance.appearanceNamed_(NSAppearanceNameAqua)
+                app.setAppearance_(aqua)
+                for win in app.windows():
+                    win.setAppearance_(aqua)
+            except Exception:
+                pass
+
         self.configure(bg=_WIN_BG)
 
         self._row_queue: queue.Queue[dict[str, Any]] = queue.Queue()
@@ -180,9 +104,6 @@ class WattbikeApp(tk.Tk):
         self.var_test_mode = tk.StringVar(value=get_test_mode_pref("single"))
         self.var_multi_sort = tk.StringVar(value="cronologico")
 
-        # Genera icone native
-        self._icons = _create_app_icons()
-
         self._build_style()
         self._build_menu()
         self._build_ui()
@@ -197,25 +118,117 @@ class WattbikeApp(tk.Tk):
     def _build_style(self) -> None:
         style = ttk.Style(self)
         wsys = self.tk.call("tk", "windowingsystem")
-        theme = "winnative" if wsys == "win32" else ("aqua" if wsys == "aqua" else "clam")
+        theme = "winnative" if wsys == "win32" else "clam"
         try:
             style.theme_use(theme)
         except tk.TclError:
             pass
 
+        self.configure(bg=_WIN_BG)
+
         style.configure("TFrame", background=_WIN_BG)
-        style.configure("TLabel", background=_WIN_BG, font=_UI_FONT)
-        style.configure("Title.TLabel", font=(_UI_FONT[0], 11, "bold"), foreground="#1a252f")
-        style.configure("Big.TLabel", font=_UI_FONT_BIG, foreground="#2c3e50")
-        style.configure("Metric.TLabel", font=_UI_FONT_METRIC, foreground="#111111")
-        style.configure("MetricCap.TLabel", font=_UI_FONT_SMALL, foreground="#555555")
-        style.configure("Status.TLabel", font=_UI_FONT_SMALL, foreground="#333333")
-        style.configure("Start.TButton", font=_UI_FONT_BOLD, padding=(12, 6))
-        style.configure("Stop.TButton", font=_UI_FONT_BOLD, padding=(12, 6))
-        style.configure("Toolbar.TButton", font=_UI_FONT_SMALL, padding=(8, 4))
-        style.configure("CardVal.TLabel", font=(_UI_FONT[0], 15, "bold"), foreground="#2c3e50")
-        style.configure("CardSub.TLabel", font=_UI_FONT_SMALL, foreground="#7f8c8d")
-        style.configure("Header.TLabel", font=(_UI_FONT[0], 11, "bold"), foreground="#2c3e50")
+        style.configure("TLabel", background=_WIN_BG, foreground="#000000", font=_UI_FONT)
+        style.configure("Title.TLabel", background=_WIN_BG, font=(_UI_FONT[0], 11, "bold"), foreground="#1a252f")
+        style.configure("Big.TLabel", background=_WIN_BG, font=_UI_FONT_BIG, foreground="#2c3e50")
+        style.configure("Status.TLabel", background=_WIN_BG, font=_UI_FONT_SMALL, foreground="#222222")
+        style.configure("Header.TLabel", background=_WIN_BG, font=(_UI_FONT[0], 11, "bold"), foreground="#2c3e50")
+
+        # LabelFrame in stile Windows classico (bordo inciso grigio)
+        style.configure(
+            "TLabelframe",
+            background=_WIN_BG,
+            bordercolor="#919b9c",
+            lightcolor=_WIN_BG,
+            darkcolor=_WIN_BG,
+        )
+        style.configure(
+            "TLabelframe.Label",
+            background=_WIN_BG,
+            foreground="#000000",
+            font=_UI_FONT_BOLD,
+        )
+
+        # Pulsanti stile Windows classico (rettangolari, bevel 3D, contrasto elevato)
+        style.configure(
+            "TButton",
+            background=_WIN_BG,
+            foreground="#000000",
+            font=_UI_FONT,
+            padding=(10, 4),
+            borderwidth=1,
+            relief=tk.RAISED,
+        )
+        style.map(
+            "TButton",
+            background=[("pressed", "#e0dcc8"), ("active", "#f2efe4"), ("disabled", "#e8e4d4")],
+            relief=[("pressed", tk.SUNKEN), ("!pressed", tk.RAISED)],
+            foreground=[("disabled", "#888888")],
+        )
+
+        style.configure(
+            "Start.TButton",
+            font=_UI_FONT_BOLD,
+            foreground="#0e6251",
+            padding=(12, 5),
+            relief=tk.RAISED,
+        )
+        style.map(
+            "Start.TButton",
+            foreground=[("disabled", "#888888"), ("!disabled", "#0e6251")],
+            background=[("pressed", "#d5e8d4"), ("active", "#eafaf1")],
+        )
+
+        style.configure(
+            "Stop.TButton",
+            font=_UI_FONT_BOLD,
+            foreground="#922b21",
+            padding=(12, 5),
+            relief=tk.RAISED,
+        )
+        style.map(
+            "Stop.TButton",
+            foreground=[("disabled", "#888888"), ("!disabled", "#922b21")],
+            background=[("pressed", "#fadbd8"), ("active", "#fdedec")],
+        )
+
+        style.configure("Toolbar.TButton", font=_UI_FONT, padding=(8, 4))
+
+        # Schede Notebook stile Windows classico
+        style.configure("TNotebook", background=_WIN_BG, tabmargins=[4, 4, 4, 0])
+        style.configure(
+            "TNotebook.Tab",
+            background="#d8d4c4",
+            foreground="#000000",
+            font=_UI_FONT,
+            padding=(14, 5),
+            borderwidth=1,
+        )
+        style.map(
+            "TNotebook.Tab",
+            background=[("selected", _WIN_BG), ("active", "#e4e0d0")],
+            font=[("selected", _UI_FONT_BOLD)],
+        )
+
+        # Controlli Radio / Check
+        style.configure("TRadiobutton", background=_WIN_BG, foreground="#000000", font=_UI_FONT)
+        style.configure("TCheckbutton", background=_WIN_BG, foreground="#000000", font=_UI_FONT)
+
+        # Tabella Treeview
+        style.configure(
+            "Treeview",
+            background="#ffffff",
+            foreground="#000000",
+            fieldbackground="#ffffff",
+            font=_UI_FONT,
+            rowheight=22,
+        )
+        style.configure(
+            "Treeview.Heading",
+            background="#e0dcc8",
+            foreground="#000000",
+            font=_UI_FONT_BOLD,
+            relief=tk.RAISED,
+        )
 
     def _build_menu(self) -> None:
         menubar = tk.Menu(self)
@@ -259,15 +272,13 @@ class WattbikeApp(tk.Tk):
         self.bind("<Control-s>", lambda _e: self._on_export_excel())
 
     def _build_ui(self) -> None:
-        # 1. Barra superiore Toolbar (pulsanti con icone grafiche)
+        # 1. Barra superiore Toolbar
         top_bar = ttk.Frame(self, padding=(10, 8, 10, 4))
         top_bar.pack(fill=tk.X)
 
         self.btn_start = ttk.Button(
             top_bar,
-            text=" Start",
-            image=self._icons["start"],
-            compound="left",
+            text="▶  Start",
             style="Start.TButton",
             command=self._on_start,
             state=tk.DISABLED,
@@ -276,9 +287,7 @@ class WattbikeApp(tk.Tk):
 
         self.btn_stop = ttk.Button(
             top_bar,
-            text=" Stop",
-            image=self._icons["stop"],
-            compound="left",
+            text="■  Stop",
             style="Stop.TButton",
             command=self._on_stop,
             state=tk.DISABLED,
@@ -289,19 +298,15 @@ class WattbikeApp(tk.Tk):
 
         self.btn_open = ttk.Button(
             top_bar,
-            text=" Apri CSV/Excel…",
-            image=self._icons["open"],
-            compound="left",
+            text="Apri CSV/Excel…",
             style="Toolbar.TButton",
             command=self._on_open_file,
         )
-        self.btn_open.pack(side=tk.LEFT, padx=(4, 6))
+        self.btn_open.pack(side=tk.LEFT, padx=(2, 6))
 
         self.btn_export = ttk.Button(
             top_bar,
-            text=" Salva Excel…",
-            image=self._icons["save"],
-            compound="left",
+            text="Salva Excel…",
             style="Toolbar.TButton",
             command=self._on_export_excel,
         )
@@ -309,9 +314,7 @@ class WattbikeApp(tk.Tk):
 
         self.btn_drivers = ttk.Button(
             top_bar,
-            text=" Driver ANT+",
-            image=self._icons["driver"],
-            compound="left",
+            text="Driver ANT+",
             style="Toolbar.TButton",
             command=self._on_repair_drivers,
         )
@@ -362,7 +365,7 @@ class WattbikeApp(tk.Tk):
         self.lbl_detected = ttk.Label(opts_box, text="", style="Status.TLabel")
         self.lbl_detected.pack(side=tk.RIGHT, padx=8)
 
-        # 3. Metriche live (6 riquadri beveled incassati)
+        # 3. Metriche live (6 riquadri beveled incassati ad alto contrasto)
         metrics_wrap = ttk.Frame(self, padding=(10, 0))
         metrics_wrap.pack(fill=tk.X)
 
@@ -373,32 +376,35 @@ class WattbikeApp(tk.Tk):
         self.lbl_avg = self._metric_box(metrics_wrap, "MEDIA W", "—", 4)
         self.lbl_packets = self._metric_box(metrics_wrap, "PACCHETTI", "0", 5)
 
-        # 4. Barra di stato inferiore incassata (packata prima per fissarla sul fondo)
-        status_bar = ttk.Frame(self, relief=tk.SUNKEN, borderwidth=1, padding=(4, 2))
-        status_bar.pack(fill=tk.X, side=tk.BOTTOM, padx=2, pady=(2, 2))
+        # 4. Barra di stato inferiore incassata
+        status_bar = tk.Frame(
+            self,
+            bg=_WIN_BG,
+            relief=tk.SUNKEN,
+            bd=1,
+            highlightthickness=1,
+            highlightbackground="#b0aca0",
+            height=24,
+        )
+        status_bar.pack(fill=tk.X, side=tk.BOTTOM, padx=4, pady=(2, 2))
 
-        self.lbl_status = ttk.Label(status_bar, text="Preparazione radio ANT+ / BLE…", style="Status.TLabel")
-        self.lbl_status.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.lbl_status = tk.Label(status_bar, text="Preparazione radio ANT+ / BLE…", bg=_WIN_BG, fg="#222222", font=_UI_FONT_SMALL)
+        self.lbl_status.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
 
-        self.lbl_radio_status = ttk.Label(status_bar, text="Radio: in attesa", style="Status.TLabel", width=24)
+        self.lbl_radio_status = tk.Label(status_bar, text="Radio: in attesa", bg=_WIN_BG, fg="#222222", font=_UI_FONT_SMALL, width=24, anchor=tk.W)
         self.lbl_radio_status.pack(side=tk.LEFT, padx=6)
 
-        self.lbl_stats_status = ttk.Label(status_bar, text="Modalità: Picco Singolo", style="Status.TLabel", width=26)
+        self.lbl_stats_status = tk.Label(status_bar, text="Modalità: Picco Singolo", bg=_WIN_BG, fg="#444444", font=_UI_FONT_SMALL, width=24, anchor=tk.E)
         self.lbl_stats_status.pack(side=tk.RIGHT, padx=4)
 
-        # 5. Notebook a schede con icone grafiche
+        # 5. Notebook a schede pulito stile Windows
         self.notebook = ttk.Notebook(self, padding=4)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=8, pady=(4, 4))
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
         # --- Tab 1: Monitor Live & Grafici ---
         self.tab_live = ttk.Frame(self.notebook, padding=6)
-        self.notebook.add(
-            self.tab_live,
-            text=" Monitor Live & Grafici ",
-            image=self._icons["chart"],
-            compound="left",
-        )
+        self.notebook.add(self.tab_live, text="  Monitor Live & Grafici  ")
 
         self.lbl_countdown = ttk.Label(self.tab_live, text="", style="Big.TLabel", anchor=tk.CENTER)
         self.lbl_countdown.pack(fill=tk.X, pady=(0, 2))
@@ -417,7 +423,8 @@ class WattbikeApp(tk.Tk):
             font=_UI_FONT_SMALL,
             bg=_PANEL_BG,
             fg="#222222",
-            relief=tk.FLAT,
+            relief=tk.SUNKEN,
+            bd=1,
             highlightthickness=1,
             highlightbackground=_CHART_BORDER,
             state=tk.DISABLED,
@@ -430,21 +437,37 @@ class WattbikeApp(tk.Tk):
 
         # --- Tab 2: Report Analisi Risultati ---
         self.tab_report = ttk.Frame(self.notebook, padding=8)
-        self.notebook.add(
-            self.tab_report,
-            text=" Report Analisi Risultati ",
-            image=self._icons["report"],
-            compound="left",
-        )
+        self.notebook.add(self.tab_report, text="  Report Analisi Risultati  ")
         self._build_report_tab(self.tab_report)
 
-    def _metric_box(self, parent: ttk.Frame, caption: str, value: str, col: int) -> ttk.Label:
-        box = ttk.Frame(parent, padding=(6, 4), relief=tk.GROOVE, borderwidth=2)
+    def _metric_box(self, parent: ttk.Frame, caption: str, value: str, col: int) -> tk.Label:
+        box = tk.Frame(
+            parent,
+            bg=_PANEL_BG,
+            relief=tk.SUNKEN,
+            bd=1,
+            highlightthickness=1,
+            highlightbackground=_CHART_BORDER,
+        )
         box.grid(row=0, column=col, sticky="nsew", padx=3, pady=2)
         parent.columnconfigure(col, weight=1)
-        ttk.Label(box, text=caption, style="MetricCap.TLabel").pack(anchor=tk.W)
-        lbl = ttk.Label(box, text=value, style="Metric.TLabel")
-        lbl.pack(anchor=tk.W)
+        tk.Label(
+            box,
+            text=caption,
+            bg=_PANEL_BG,
+            fg="#555555",
+            font=_UI_FONT_SMALL_BOLD,
+            anchor=tk.W,
+        ).pack(fill=tk.X, padx=6, pady=(4, 0))
+        lbl = tk.Label(
+            box,
+            text=value,
+            bg=_PANEL_BG,
+            fg="#000000",
+            font=_UI_FONT_METRIC,
+            anchor=tk.W,
+        )
+        lbl.pack(fill=tk.X, padx=6, pady=(0, 4))
         return lbl
 
     def _build_report_tab(self, parent: ttk.Frame) -> None:
@@ -461,15 +484,13 @@ class WattbikeApp(tk.Tk):
         btn_box.pack(side=tk.RIGHT)
         ttk.Button(
             btn_box,
-            text=" Salva Excel",
-            image=self._icons["save"],
-            compound="left",
+            text="Salva Excel…",
             command=self._on_export_excel,
             style="Toolbar.TButton",
         ).pack(side=tk.LEFT, padx=4)
         ttk.Button(
             btn_box,
-            text=" Salva CSV",
+            text="Salva CSV…",
             command=self._on_export_csv,
             style="Toolbar.TButton",
         ).pack(side=tk.LEFT, padx=4)
@@ -510,19 +531,19 @@ class WattbikeApp(tk.Tk):
         multi_summary.pack(fill=tk.X, pady=(0, 6))
 
         self.lbl_m_peaks_count = self._report_card(multi_summary, "PICCHI TOTALI", "0", "Separati da zeri", 0, 0)
-        self.lbl_m_max_p = self._report_card(multi_summary, "PICCO POTENZA MAX", "—", "Miglior sprint", 0, 1)
+        self.lbl_m_max_p = self._report_card(multi_summary, "PICCO POTENZA", "—", "Miglior sprint", 0, 1)
         self.lbl_m_max_cad = self._report_card(multi_summary, "CADENZA MAX", "—", "Massimo assoluto", 0, 2)
-        self.lbl_m_best_app = self._report_card(multi_summary, "MIGLIOR T_APP", "—", "Minimo tempo applicazione", 0, 3)
-        self.lbl_m_avg_decay_p = self._report_card(multi_summary, "DECADENZA MEDIA POTENZA", "—", "Fatigue Index medio W", 0, 4)
-        self.lbl_m_avg_decay_c = self._report_card(multi_summary, "DECADENZA MEDIA CADENZA", "—", "Fatigue Index cadenza", 0, 5)
+        self.lbl_m_best_app = self._report_card(multi_summary, "MIGLIOR T_APP", "—", "Minimo tempo spinta", 0, 3)
+        self.lbl_m_avg_decay_p = self._report_card(multi_summary, "DECADENZA W", "—", "Fatigue Index medio W", 0, 4)
+        self.lbl_m_avg_decay_c = self._report_card(multi_summary, "DECADENZA CAD", "—", "Fatigue Index cadenza", 0, 5)
 
         sort_bar = ttk.Frame(self.frame_multi_report)
         sort_bar.pack(fill=tk.X, pady=(4, 4))
-        ttk.Label(sort_bar, text="Visualizzazione Tabella:", font=_UI_FONT_BOLD).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Label(sort_bar, text="Ordina per:", font=_UI_FONT_BOLD).pack(side=tk.LEFT, padx=(0, 8))
 
         ttk.Radiobutton(
             sort_bar,
-            text="Ordine Cronologico (Timeline Grafico)",
+            text="Cronologico",
             value="cronologico",
             variable=self.var_multi_sort,
             command=self._refresh_multi_table,
@@ -530,7 +551,7 @@ class WattbikeApp(tk.Tk):
 
         ttk.Radiobutton(
             sort_bar,
-            text="Classifica Decrescente Potenza (Ranking Decadenza)",
+            text="Ranking Potenza (Decadenza)",
             value="potenza",
             variable=self.var_multi_sort,
             command=self._refresh_multi_table,
@@ -538,7 +559,7 @@ class WattbikeApp(tk.Tk):
 
         ttk.Radiobutton(
             sort_bar,
-            text="Classifica Decrescente Cadenza",
+            text="Ranking Cadenza",
             value="cadenza",
             variable=self.var_multi_sort,
             command=self._refresh_multi_table,
@@ -564,18 +585,18 @@ class WattbikeApp(tk.Tk):
         self.tree_peaks = ttk.Treeview(tbl_frame, columns=cols, show="headings", height=9)
 
         col_defs = [
-            ("index", "Sprint", 70, "center"),
-            ("t0", "t0 (s)", 75, "center"),
-            ("tx", "tx Picco (s)", 85, "center"),
-            ("t_app", "t_app (s)", 80, "center"),
-            ("p_peak", "Picco Potenza (W)", 115, "center"),
-            ("cad_peak", "Cad @ Picco (rpm)", 115, "center"),
-            ("cad_max", "Cad Max (rpm)", 95, "center"),
-            ("torque_peak", "Coppia @ Picco (Nm)", 125, "center"),
-            ("decay_p_w", "Decadenza W", 95, "center"),
-            ("decay_p_pct", "Decadenza Potenza %", 130, "center"),
-            ("decay_c_rpm", "Decadenza Cad (rpm)", 125, "center"),
-            ("decay_c_pct", "Decadenza Cad %", 115, "center"),
+            ("index", "#", 45, "center"),
+            ("t0", "t0 (s)", 65, "center"),
+            ("tx", "tx (s)", 65, "center"),
+            ("t_app", "t_app (s)", 70, "center"),
+            ("p_peak", "Picco (W)", 85, "center"),
+            ("cad_peak", "Cad Picco", 80, "center"),
+            ("cad_max", "Cad Max", 75, "center"),
+            ("torque_peak", "Coppia (Nm)", 85, "center"),
+            ("decay_p_w", "Δ Watt", 75, "center"),
+            ("decay_p_pct", "Decad. %", 75, "center"),
+            ("decay_c_rpm", "Δ Cad", 75, "center"),
+            ("decay_c_pct", "Decad. Cad %", 85, "center"),
         ]
         for cid, text, width, anchor in col_defs:
             self.tree_peaks.heading(cid, text=text)
@@ -593,16 +614,44 @@ class WattbikeApp(tk.Tk):
 
     def _report_card(
         self, parent: ttk.Frame, title: str, value: str, subtitle: str, row: int, col: int
-    ) -> tuple[ttk.Label, ttk.Label]:
-        card = ttk.Frame(parent, padding=(6, 4), relief=tk.GROOVE, borderwidth=1)
+    ) -> tuple[tk.Label, tk.Label]:
+        card = tk.Frame(
+            parent,
+            bg=_PANEL_BG,
+            relief=tk.SUNKEN,
+            bd=1,
+            highlightthickness=1,
+            highlightbackground=_CHART_BORDER,
+        )
         card.grid(row=row, column=col, sticky="nsew", padx=3, pady=3)
         parent.columnconfigure(col, weight=1)
 
-        ttk.Label(card, text=title, style="MetricCap.TLabel").pack(anchor=tk.W)
-        lbl_val = ttk.Label(card, text=value, style="CardVal.TLabel")
-        lbl_val.pack(anchor=tk.W, pady=(2, 1))
-        lbl_sub = ttk.Label(card, text=subtitle, style="CardSub.TLabel")
-        lbl_sub.pack(anchor=tk.W)
+        tk.Label(
+            card,
+            text=title,
+            bg=_PANEL_BG,
+            fg="#555555",
+            font=_UI_FONT_SMALL_BOLD,
+            anchor=tk.W,
+        ).pack(fill=tk.X, padx=6, pady=(4, 0))
+        lbl_val = tk.Label(
+            card,
+            text=value,
+            bg=_PANEL_BG,
+            fg="#000000",
+            font=_UI_FONT_CARD,
+            anchor=tk.W,
+        )
+        lbl_val.pack(fill=tk.X, padx=6, pady=(1, 1))
+        lbl_sub = tk.Label(
+            card,
+            text=subtitle,
+            bg=_PANEL_BG,
+            fg="#777777",
+            font=_UI_FONT_SMALL,
+            anchor=tk.W,
+        )
+        lbl_sub.pack(fill=tk.X, padx=6, pady=(0, 4))
         return lbl_val, lbl_sub
 
     def _on_tab_changed(self, _event: Any = None) -> None:
@@ -1179,7 +1228,7 @@ class WattbikeApp(tk.Tk):
                 "",
                 tk.END,
                 values=(
-                    f"Picco {pk.index}",
+                    f"#{pk.index}",
                     f"{pk.t0:.3f}",
                     f"{pk.t_peak:.3f}",
                     f"{pk.t_app:.3f}",

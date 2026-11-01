@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.3
+
+- **Restyling e Polish Completo UI Windows Classic**:
+  - Risolto definitivamente il contrasto e il tema su macOS: forzata l'appearance Light (`NSAppearanceNameAqua`) a livello Cocoa per impedire che la Dark Mode di sistema renda scuri e illeggibili i pannelli e i testi.
+  - Rimossi i rozzi glifi bitmap disegnati manualmente dai pulsanti e dalle schede; ripristinata la tipografia pulita ed elegante in stile utility Windows (Windows XP / 2000 dialog beige `#ece9d8`).
+  - Riquadri metriche ridisegnati come pannelli digitali bianchi incassati (`#ffffff` con bevel 3D), etichette scure nitide ad alto contrasto e numeri grandi in grassetto puro nero.
+  - Schede e tabelle formattate senza sovrapposizioni o testi troncati nelle colonne.
+
 ## 1.6.2
 
 - **Auto-updater macOS & Cross-Platform Fixes**:
