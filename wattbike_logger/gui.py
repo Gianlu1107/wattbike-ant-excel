@@ -38,11 +38,11 @@ from .updater import apply_update, check_latest_release, frozen_executable
 _UI_FONT = ("Segoe UI", 10) if sys.platform.startswith("win") else ("Helvetica", 10)
 _UI_FONT_BOLD = (_UI_FONT[0], 10, "bold")
 _UI_FONT_BIG = (_UI_FONT[0], 26, "bold")
-_UI_FONT_METRIC = (_UI_FONT[0], 19, "bold")
+_UI_FONT_METRIC = (_UI_FONT[0], 18, "bold")
 _UI_FONT_SMALL = (_UI_FONT[0], 9)
 _UI_FONT_AXIS = (_UI_FONT[0], 8)
 
-# Palette stile Windows classico / utilità tecnica
+# Palette stile Windows classico
 _WIN_BG = "#f0f0f0"
 _PANEL_BG = "#ffffff"
 _CHART_BG = "#fafafa"
@@ -52,6 +52,98 @@ _CHART_AXIS = "#555555"
 _CHART_BORDER = "#a0a0a0"
 _POWER_COLOR = "#c0392b"
 _CAD_COLOR = "#2471a3"
+
+
+def _create_app_icons() -> dict[str, tk.PhotoImage]:
+    """Genera icone 16x16 grafiche native (senza emoji) in puro Tkinter."""
+    icons: dict[str, tk.PhotoImage] = {}
+
+    # 1. Start (Freccia verde play classica)
+    img_start = tk.PhotoImage(width=16, height=16)
+    for y in range(2, 14):
+        dist = abs(y - 7.5)
+        w = int(12 - dist * 1.8)
+        for x in range(3, min(14, 3 + w)):
+            img_start.put("#1e8449", (x, y))
+    icons["start"] = img_start
+
+    # 2. Stop (Quadrato rosso classico)
+    img_stop = tk.PhotoImage(width=16, height=16)
+    for y in range(3, 13):
+        for x in range(3, 13):
+            img_stop.put("#c0392b", (x, y))
+    icons["stop"] = img_stop
+
+    # 3. Open (Cartella gialla Windows classica)
+    img_open = tk.PhotoImage(width=16, height=16)
+    for y in range(4, 6):
+        for x in range(2, 7):
+            img_open.put("#b7950b", (x, y))
+    for y in range(6, 14):
+        for x in range(2, 15):
+            img_open.put("#f1c40f", (x, y))
+    for x in range(2, 15):
+        img_open.put("#7d6608", (x, 13))
+    icons["open"] = img_open
+
+    # 4. Save (Floppy disk 3.5" blu Windows classico)
+    img_save = tk.PhotoImage(width=16, height=16)
+    for y in range(2, 14):
+        for x in range(2, 14):
+            img_save.put("#2980b9", (x, y))
+    for y in range(2, 7):
+        for x in range(5, 11):
+            img_save.put("#bdc3c7", (x, y))
+    for y in range(8, 13):
+        for x in range(4, 12):
+            img_save.put("#ffffff", (x, y))
+    icons["save"] = img_save
+
+    # 5. Chart / Monitor Live (Grafico a barre/linea classico)
+    img_chart = tk.PhotoImage(width=16, height=16)
+    for y in range(2, 14):
+        img_chart.put("#333333", (2, y))
+    for x in range(2, 14):
+        img_chart.put("#333333", (x, 13))
+    for y in range(8, 13):
+        img_chart.put("#2980b9", (4, y))
+        img_chart.put("#2980b9", (5, y))
+    for y in range(5, 13):
+        img_chart.put("#c0392b", (7, y))
+        img_chart.put("#c0392b", (8, y))
+    for y in range(3, 13):
+        img_chart.put("#27ae60", (10, y))
+        img_chart.put("#27ae60", (11, y))
+    icons["chart"] = img_chart
+
+    # 6. Report / Analisi (Foglio documento classico)
+    img_report = tk.PhotoImage(width=16, height=16)
+    for y in range(2, 14):
+        for x in range(3, 13):
+            img_report.put("#ffffff", (x, y))
+    for x in range(3, 13):
+        img_report.put("#7f8c8d", (x, 2))
+        img_report.put("#7f8c8d", (x, 13))
+    for y in range(2, 14):
+        img_report.put("#7f8c8d", (3, y))
+        img_report.put("#7f8c8d", (12, y))
+    for x in range(5, 11):
+        img_report.put("#2980b9", (x, 5))
+        img_report.put("#2980b9", (x, 8))
+        img_report.put("#2980b9", (x, 11))
+    icons["report"] = img_report
+
+    # 7. Driver / Setup (Ingranaggio / chiave inglese)
+    img_driver = tk.PhotoImage(width=16, height=16)
+    for y in range(3, 13):
+        img_driver.put("#555555", (y, y))
+        img_driver.put("#555555", (15 - y, y))
+    for x in range(5, 11):
+        for y in range(5, 11):
+            img_driver.put("#7f8c8d", (x, y))
+    icons["driver"] = img_driver
+
+    return icons
 
 
 class WattbikeApp(tk.Tk):
@@ -72,6 +164,7 @@ class WattbikeApp(tk.Tk):
         self._peak_markers: list[tuple[float, float, str]] = []
         self._last_rows: list[dict[str, Any]] = []
         self._last_analysis: SinglePeakAnalysis | MultiPeakAnalysis | None = None
+        self._redraw_job: str | None = None
 
         self._pkt_count = 0
         self._power_sum = 0.0
@@ -87,6 +180,9 @@ class WattbikeApp(tk.Tk):
         self.var_test_mode = tk.StringVar(value=get_test_mode_pref("single"))
         self.var_multi_sort = tk.StringVar(value="cronologico")
 
+        # Genera icone native
+        self._icons = _create_app_icons()
+
         self._build_style()
         self._build_menu()
         self._build_ui()
@@ -100,20 +196,22 @@ class WattbikeApp(tk.Tk):
 
     def _build_style(self) -> None:
         style = ttk.Style(self)
+        wsys = self.tk.call("tk", "windowingsystem")
+        theme = "winnative" if wsys == "win32" else ("aqua" if wsys == "aqua" else "clam")
         try:
-            style.theme_use("winnative" if self.tk.call("tk", "windowingsystem") == "win32" else "clam")
+            style.theme_use(theme)
         except tk.TclError:
-            style.theme_use("clam")
+            pass
 
         style.configure("TFrame", background=_WIN_BG)
         style.configure("TLabel", background=_WIN_BG, font=_UI_FONT)
-        style.configure("Title.TLabel", font=(_UI_FONT[0], 12, "bold"), foreground="#1a252f")
+        style.configure("Title.TLabel", font=(_UI_FONT[0], 11, "bold"), foreground="#1a252f")
         style.configure("Big.TLabel", font=_UI_FONT_BIG, foreground="#2c3e50")
         style.configure("Metric.TLabel", font=_UI_FONT_METRIC, foreground="#111111")
         style.configure("MetricCap.TLabel", font=_UI_FONT_SMALL, foreground="#555555")
         style.configure("Status.TLabel", font=_UI_FONT_SMALL, foreground="#333333")
-        style.configure("Start.TButton", font=_UI_FONT_BOLD, padding=(14, 6))
-        style.configure("Stop.TButton", font=_UI_FONT_BOLD, padding=(14, 6))
+        style.configure("Start.TButton", font=_UI_FONT_BOLD, padding=(12, 6))
+        style.configure("Stop.TButton", font=_UI_FONT_BOLD, padding=(12, 6))
         style.configure("Toolbar.TButton", font=_UI_FONT_SMALL, padding=(8, 4))
         style.configure("CardVal.TLabel", font=(_UI_FONT[0], 15, "bold"), foreground="#2c3e50")
         style.configure("CardSub.TLabel", font=_UI_FONT_SMALL, foreground="#7f8c8d")
@@ -135,13 +233,13 @@ class WattbikeApp(tk.Tk):
         test_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Modalità Test", menu=test_menu)
         test_menu.add_radiobutton(
-            label="Picco Singolo (TTP / Sprint Max)",
+            label="Picco Singolo",
             value="single",
             variable=self.var_test_mode,
             command=self._on_change_test_mode,
         )
         test_menu.add_radiobutton(
-            label="Picco Multiplo (Repeated Sprints / Decadenza)",
+            label="Picco Multiplo",
             value="multi",
             variable=self.var_test_mode,
             command=self._on_change_test_mode,
@@ -157,53 +255,78 @@ class WattbikeApp(tk.Tk):
         menubar.add_cascade(label="Aiuto", menu=help_menu)
         help_menu.add_command(label="Informazioni su Wattbike Logger", command=self._on_about)
 
-        # Scorciatoie da tastiera
         self.bind("<Control-o>", lambda _e: self._on_open_file())
         self.bind("<Control-s>", lambda _e: self._on_export_excel())
 
     def _build_ui(self) -> None:
-        # 1. Barra superiore (Header + Toolbar)
+        # 1. Barra superiore Toolbar (pulsanti con icone grafiche)
         top_bar = ttk.Frame(self, padding=(10, 8, 10, 4))
         top_bar.pack(fill=tk.X)
 
         self.btn_start = ttk.Button(
-            top_bar, text="▶ Start", style="Start.TButton", command=self._on_start, state=tk.DISABLED
+            top_bar,
+            text=" Start",
+            image=self._icons["start"],
+            compound="left",
+            style="Start.TButton",
+            command=self._on_start,
+            state=tk.DISABLED,
         )
         self.btn_start.pack(side=tk.LEFT, padx=(0, 6))
 
         self.btn_stop = ttk.Button(
-            top_bar, text="■ Stop", style="Stop.TButton", command=self._on_stop, state=tk.DISABLED
+            top_bar,
+            text=" Stop",
+            image=self._icons["stop"],
+            compound="left",
+            style="Stop.TButton",
+            command=self._on_stop,
+            state=tk.DISABLED,
         )
         self.btn_stop.pack(side=tk.LEFT, padx=(0, 10))
 
         ttk.Separator(top_bar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=6)
 
         self.btn_open = ttk.Button(
-            top_bar, text="📂 Apri CSV/Excel…", style="Toolbar.TButton", command=self._on_open_file
+            top_bar,
+            text=" Apri CSV/Excel…",
+            image=self._icons["open"],
+            compound="left",
+            style="Toolbar.TButton",
+            command=self._on_open_file,
         )
         self.btn_open.pack(side=tk.LEFT, padx=(4, 6))
 
         self.btn_export = ttk.Button(
-            top_bar, text="💾 Salva Excel…", style="Toolbar.TButton", command=self._on_export_excel
+            top_bar,
+            text=" Salva Excel…",
+            image=self._icons["save"],
+            compound="left",
+            style="Toolbar.TButton",
+            command=self._on_export_excel,
         )
         self.btn_export.pack(side=tk.LEFT, padx=(0, 6))
 
         self.btn_drivers = ttk.Button(
-            top_bar, text="Driver ANT+", style="Toolbar.TButton", command=self._on_repair_drivers
+            top_bar,
+            text=" Driver ANT+",
+            image=self._icons["driver"],
+            compound="left",
+            style="Toolbar.TButton",
+            command=self._on_repair_drivers,
         )
         self.btn_drivers.pack(side=tk.RIGHT)
 
         ttk.Label(top_bar, text=f"Wattbike Logger v{__version__}", style="Title.TLabel").pack(side=tk.RIGHT, padx=14)
 
-        # 2. Riquadro opzioni (Modalità test, Device ID, Bluetooth)
+        # 2. Riquadro opzioni (Modalità test senza parentesi, Device ID, Bluetooth)
         opts_box = ttk.LabelFrame(self, text=" Configurazione Sessione & Radio ", padding=(8, 4))
         opts_box.pack(fill=tk.X, padx=10, pady=(2, 6))
 
-        # Scelta modalità prima dello start
         ttk.Label(opts_box, text="Modalità:", font=_UI_FONT_BOLD).pack(side=tk.LEFT, padx=(4, 6))
         self.rb_single = ttk.Radiobutton(
             opts_box,
-            text="Picco Singolo (TTP)",
+            text="Picco Singolo",
             value="single",
             variable=self.var_test_mode,
             command=self._on_change_test_mode,
@@ -212,7 +335,7 @@ class WattbikeApp(tk.Tk):
 
         self.rb_multi = ttk.Radiobutton(
             opts_box,
-            text="Picco Multiplo (Decadenza)",
+            text="Picco Multiplo",
             value="multi",
             variable=self.var_test_mode,
             command=self._on_change_test_mode,
@@ -239,7 +362,7 @@ class WattbikeApp(tk.Tk):
         self.lbl_detected = ttk.Label(opts_box, text="", style="Status.TLabel")
         self.lbl_detected.pack(side=tk.RIGHT, padx=8)
 
-        # 3. Riquadro metriche live (6 riquadri beveled in stile Windows XP/2000)
+        # 3. Metriche live (6 riquadri beveled incassati)
         metrics_wrap = ttk.Frame(self, padding=(10, 0))
         metrics_wrap.pack(fill=tk.X)
 
@@ -250,13 +373,32 @@ class WattbikeApp(tk.Tk):
         self.lbl_avg = self._metric_box(metrics_wrap, "MEDIA W", "—", 4)
         self.lbl_packets = self._metric_box(metrics_wrap, "PACCHETTI", "0", 5)
 
-        # 4. Notebook a schede in stile Windows classico (Tab 1: Monitor Live, Tab 2: Report Analisi)
+        # 4. Barra di stato inferiore incassata (packata prima per fissarla sul fondo)
+        status_bar = ttk.Frame(self, relief=tk.SUNKEN, borderwidth=1, padding=(4, 2))
+        status_bar.pack(fill=tk.X, side=tk.BOTTOM, padx=2, pady=(2, 2))
+
+        self.lbl_status = ttk.Label(status_bar, text="Preparazione radio ANT+ / BLE…", style="Status.TLabel")
+        self.lbl_status.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        self.lbl_radio_status = ttk.Label(status_bar, text="Radio: in attesa", style="Status.TLabel", width=24)
+        self.lbl_radio_status.pack(side=tk.LEFT, padx=6)
+
+        self.lbl_stats_status = ttk.Label(status_bar, text="Modalità: Picco Singolo", style="Status.TLabel", width=26)
+        self.lbl_stats_status.pack(side=tk.RIGHT, padx=4)
+
+        # 5. Notebook a schede con icone grafiche
         self.notebook = ttk.Notebook(self, padding=4)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=8, pady=(4, 4))
+        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
         # --- Tab 1: Monitor Live & Grafici ---
         self.tab_live = ttk.Frame(self.notebook, padding=6)
-        self.notebook.add(self.tab_live, text=" 📊 Monitor Live & Grafici ")
+        self.notebook.add(
+            self.tab_live,
+            text=" Monitor Live & Grafici ",
+            image=self._icons["chart"],
+            compound="left",
+        )
 
         self.lbl_countdown = ttk.Label(self.tab_live, text="", style="Big.TLabel", anchor=tk.CENTER)
         self.lbl_countdown.pack(fill=tk.X, pady=(0, 2))
@@ -264,7 +406,7 @@ class WattbikeApp(tk.Tk):
         self.plot_frame = ttk.Frame(self.tab_live)
         self.plot_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Log driver (nascosto di default)
+        # Log driver
         self.driver_log_frame = ttk.LabelFrame(self.tab_live, text="Installazione driver ANT+", padding=6)
         log_wrap = ttk.Frame(self.driver_log_frame)
         log_wrap.pack(fill=tk.BOTH, expand=True)
@@ -286,22 +428,14 @@ class WattbikeApp(tk.Tk):
         scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self._driver_log_visible = False
 
-        # 5. Barra di stato Windows classica inferiore a 3 scomparti incassati
-        status_bar = ttk.Frame(self, relief=tk.SUNKEN, borderwidth=1, padding=(4, 2))
-        status_bar.pack(fill=tk.X, side=tk.BOTTOM, padx=2, pady=(2, 2))
-
-        self.lbl_status = ttk.Label(status_bar, text="Preparazione radio ANT+ / BLE…", style="Status.TLabel")
-        self.lbl_status.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        self.lbl_radio_status = ttk.Label(status_bar, text="Radio: in attesa", style="Status.TLabel", width=26)
-        self.lbl_radio_status.pack(side=tk.LEFT, padx=6)
-
-        self.lbl_stats_status = ttk.Label(status_bar, text="Modalità: Picco Singolo", style="Status.TLabel", width=28)
-        self.lbl_stats_status.pack(side=tk.RIGHT, padx=4)
-
         # --- Tab 2: Report Analisi Risultati ---
         self.tab_report = ttk.Frame(self.notebook, padding=8)
-        self.notebook.add(self.tab_report, text=" 📈 Report Analisi Risultati ")
+        self.notebook.add(
+            self.tab_report,
+            text=" Report Analisi Risultati ",
+            image=self._icons["report"],
+            compound="left",
+        )
         self._build_report_tab(self.tab_report)
 
     def _metric_box(self, parent: ttk.Frame, caption: str, value: str, col: int) -> ttk.Label:
@@ -315,7 +449,6 @@ class WattbikeApp(tk.Tk):
 
     def _build_report_tab(self, parent: ttk.Frame) -> None:
         """Costruisce i controlli della vista report (Picco Singolo e Multiplo)."""
-        # Barra titolo report
         top_rep = ttk.Frame(parent)
         top_rep.pack(fill=tk.X, pady=(0, 6))
 
@@ -326,22 +459,37 @@ class WattbikeApp(tk.Tk):
 
         btn_box = ttk.Frame(top_rep)
         btn_box.pack(side=tk.RIGHT)
-        ttk.Button(btn_box, text="💾 Esporta Excel", command=self._on_export_excel, style="Toolbar.TButton").pack(
-            side=tk.LEFT, padx=4
-        )
-        ttk.Button(btn_box, text="Esporta CSV", command=self._on_export_csv, style="Toolbar.TButton").pack(
-            side=tk.LEFT, padx=4
-        )
+        ttk.Button(
+            btn_box,
+            text=" Salva Excel",
+            image=self._icons["save"],
+            compound="left",
+            command=self._on_export_excel,
+            style="Toolbar.TButton",
+        ).pack(side=tk.LEFT, padx=4)
+        ttk.Button(
+            btn_box,
+            text=" Salva CSV",
+            command=self._on_export_csv,
+            style="Toolbar.TButton",
+        ).pack(side=tk.LEFT, padx=4)
 
-        # Contenitore per i due layout alternativi (Single e Multi)
-        self.frame_single_report = ttk.Frame(parent)
-        self.frame_multi_report = ttk.Frame(parent)
+        # Contenitore a sovrapposizione istantanea (tkraise, nessun lag di reflow)
+        self.report_container = ttk.Frame(parent)
+        self.report_container.pack(fill=tk.BOTH, expand=True)
+        self.report_container.rowconfigure(0, weight=1)
+        self.report_container.columnconfigure(0, weight=1)
+
+        self.frame_single_report = ttk.Frame(self.report_container)
+        self.frame_single_report.grid(row=0, column=0, sticky="nsew")
+
+        self.frame_multi_report = ttk.Frame(self.report_container)
+        self.frame_multi_report.grid(row=0, column=0, sticky="nsew")
 
         # --- LAYOUT PICCO SINGOLO ---
         cards_frame = ttk.LabelFrame(self.frame_single_report, text=" Parametri Chiave Sprint — Picco Singolo ", padding=10)
         cards_frame.pack(fill=tk.X, pady=(0, 10))
 
-        # Griglia 4x2 di card parametriche
         self.card_p_peak = self._report_card(cards_frame, "POTENZA DI PICCO (P_peak)", "—", "Massimo istantaneo", 0, 0)
         self.card_tx = self._report_card(cards_frame, "TEMPO AL PICCO (tx)", "—", "Istante temporale del picco", 0, 1)
         self.card_t_app = self._report_card(cards_frame, "TEMPO DI APPLICAZIONE (t_app)", "—", "Time to Peak (tx - t0)", 0, 2)
@@ -368,7 +516,6 @@ class WattbikeApp(tk.Tk):
         self.lbl_m_avg_decay_p = self._report_card(multi_summary, "DECADENZA MEDIA POTENZA", "—", "Fatigue Index medio W", 0, 4)
         self.lbl_m_avg_decay_c = self._report_card(multi_summary, "DECADENZA MEDIA CADENZA", "—", "Fatigue Index cadenza", 0, 5)
 
-        # Selettore ordinamento tabella
         sort_bar = ttk.Frame(self.frame_multi_report)
         sort_bar.pack(fill=tk.X, pady=(4, 4))
         ttk.Label(sort_bar, text="Visualizzazione Tabella:", font=_UI_FONT_BOLD).pack(side=tk.LEFT, padx=(0, 8))
@@ -397,7 +544,6 @@ class WattbikeApp(tk.Tk):
             command=self._refresh_multi_table,
         ).pack(side=tk.LEFT, padx=6)
 
-        # Tabella Treeview con scrollbar in classico stile Windows
         tbl_frame = ttk.Frame(self.frame_multi_report)
         tbl_frame.pack(fill=tk.BOTH, expand=True)
 
@@ -443,7 +589,6 @@ class WattbikeApp(tk.Tk):
         sb_y.pack(side=tk.RIGHT, fill=tk.Y)
         sb_x.pack(side=tk.BOTTOM, fill=tk.X)
 
-        # Mostra frame iniziale
         self._on_change_test_mode()
 
     def _report_card(
@@ -460,24 +605,41 @@ class WattbikeApp(tk.Tk):
         lbl_sub.pack(anchor=tk.W)
         return lbl_val, lbl_sub
 
+    def _on_tab_changed(self, _event: Any = None) -> None:
+        """Cambio scheda immediato senza lag."""
+        try:
+            selected = self.notebook.select()
+        except tk.TclError:
+            return
+
+        if selected == str(self.tab_report):
+            rows = self._last_rows
+            if not rows and self._session and self._session.rows:
+                rows = list(self._session.rows)
+            if rows:
+                self._update_analysis(rows)
+        elif selected == str(self.tab_live):
+            self._redraw_plots()
+        self.update_idletasks()
+
     def _on_change_test_mode(self) -> None:
-        """Cambio modalità Picco Singolo / Multiplo."""
+        """Cambio modalità Picco Singolo / Multiplo (senza parentesi nei testi)."""
         mode = self.var_test_mode.get()
         set_test_mode_pref(mode)
-        mode_text = "Picco Singolo (TTP)" if mode == "single" else "Picco Multiplo (Decadenza)"
+        mode_text = "Picco Singolo" if mode == "single" else "Picco Multiplo"
         if hasattr(self, "lbl_stats_status"):
             self.lbl_stats_status.configure(text=f"Modalità: {mode_text}")
 
-        if mode == "single":
-            self.frame_multi_report.pack_forget()
-            self.frame_single_report.pack(fill=tk.BOTH, expand=True)
-        else:
-            self.frame_single_report.pack_forget()
-            self.frame_multi_report.pack(fill=tk.BOTH, expand=True)
+        # tkraise è istantaneo e azzera il tempo di layout
+        if hasattr(self, "frame_single_report") and hasattr(self, "frame_multi_report"):
+            if mode == "single":
+                self.frame_single_report.tkraise()
+            else:
+                self.frame_multi_report.tkraise()
 
-        # Ricalcola l'analisi se abbiamo righe già caricate
         if self._last_rows:
             self._update_analysis(self._last_rows)
+        self.update_idletasks()
 
     def _init_plots(self) -> None:
         wrap = ttk.Frame(self.plot_frame)
@@ -518,8 +680,18 @@ class WattbikeApp(tk.Tk):
         canvas._y_default = y_default  # type: ignore[attr-defined]
         canvas._show_xlabel = show_xlabel  # type: ignore[attr-defined]
         canvas._show_peaks = False  # type: ignore[attr-defined]
-        canvas.bind("<Configure>", lambda _e: self._redraw_plots())
+        canvas.bind("<Configure>", lambda _e: self._schedule_redraw_plots())
         return canvas
+
+    def _schedule_redraw_plots(self) -> None:
+        """Evita redraw ripetuti durante il resize o cambio tab."""
+        if self._redraw_job is not None:
+            return
+        self._redraw_job = self.after(40, self._do_scheduled_redraw)
+
+    def _do_scheduled_redraw(self) -> None:
+        self._redraw_job = None
+        self._redraw_plots()
 
     @staticmethod
     def _nice_ticks(lo: float, hi: float, n: int = 5) -> list[float]:
@@ -546,6 +718,10 @@ class WattbikeApp(tk.Tk):
         return ticks or [lo, hi]
 
     def _draw_series(self, canvas: tk.Canvas, series: deque[tuple[float, float]]) -> None:
+        # Non ridisegnare se la canvas non è mappata a schermo (es. tab nascosto)
+        if not canvas.winfo_ismapped():
+            return
+
         canvas.delete("all")
         w = max(int(canvas.winfo_width()), 40)
         h = max(int(canvas.winfo_height()), 40)
@@ -576,7 +752,6 @@ class WattbikeApp(tk.Tk):
             xmin, xmax = 0.0, 60.0
             ymin, ymax = y_def
 
-        # Sfondo rettangolo
         canvas.create_rectangle(x0, y0, x1, y1, fill=_CHART_PLOT, outline=_CHART_BORDER)
 
         y_ticks = self._nice_ticks(ymin, ymax, 5)
@@ -641,7 +816,6 @@ class WattbikeApp(tk.Tk):
             font=_UI_FONT_SMALL,
         )
 
-        # Evidenziazione visiva dei punti di picco rilevati dall'analisi
         if getattr(canvas, "_show_peaks", False) and self._peak_markers:
             for p_time, p_val, p_lbl in self._peak_markers:
                 if xmin <= p_time <= xmax:
@@ -738,7 +912,7 @@ class WattbikeApp(tk.Tk):
         self.lbl_avg.configure(text=f"{avg:.0f}")
         self.lbl_packets.configure(text=str(self._pkt_count))
         if self._pkt_count % 2 == 0:
-            self._redraw_plots()
+            self._schedule_redraw_plots()
 
     def _redraw_plots(self) -> None:
         if getattr(self, "canvas_power", None) is not None:
@@ -780,7 +954,6 @@ class WattbikeApp(tk.Tk):
         self.lbl_countdown.configure(text="3")
         self._set_status("Countdown… preparazione radio")
 
-        # Assicurati di mostrare la scheda monitor durante il live
         self.notebook.select(self.tab_live)
 
         def on_device(dev_id: int, type_name: str) -> None:
@@ -880,12 +1053,8 @@ class WattbikeApp(tk.Tk):
         clean = deduplicate_session_rows(rows)
         self._last_rows = clean
 
-        # Elabora e mostra immediatamente l'analisi
         self._update_analysis(clean)
-        # Passa automaticamente alla scheda Report Analisi
         self.notebook.select(self.tab_report)
-
-        # Proponi salvataggio file
         self._prompt_save_session(clean)
 
     def _prompt_save_session(self, rows: list[dict[str, Any]]) -> None:
@@ -945,13 +1114,12 @@ class WattbikeApp(tk.Tk):
         analysis = analyze_session(clean, mode=mode)
         self._last_analysis = analysis
 
-        # Popola marker dei picchi sui grafici
         self._peak_markers.clear()
 
         if isinstance(analysis, SinglePeakAnalysis):
             pk = analysis.peak
             self.lbl_report_title.configure(
-                text=f"Analisi Picco Singolo (TTP) — {analysis.rows_count} righe, durata {analysis.session_duration:.1f} s"
+                text=f"Analisi Picco Singolo — {analysis.rows_count} righe, durata {analysis.session_duration:.1f} s"
             )
             if pk:
                 self.card_p_peak[0].configure(text=f"{pk.power_peak} W")
@@ -974,7 +1142,7 @@ class WattbikeApp(tk.Tk):
 
         elif isinstance(analysis, MultiPeakAnalysis):
             self.lbl_report_title.configure(
-                text=f"Analisi Repeated Sprints (Picchi Multipli) — {analysis.total_peaks} picchi rilevati"
+                text=f"Analisi Picco Multiplo — {analysis.total_peaks} picchi rilevati"
             )
             self.lbl_m_peaks_count[0].configure(text=str(analysis.total_peaks))
             self.lbl_m_max_p[0].configure(text=f"{analysis.max_power_peak} W")
@@ -988,7 +1156,7 @@ class WattbikeApp(tk.Tk):
 
             self._refresh_multi_table()
 
-        self._redraw_plots()
+        self._schedule_redraw_plots()
 
     def _refresh_multi_table(self) -> None:
         """Aggiorna le righe del Treeview in base all'ordinamento selezionato."""
@@ -1048,7 +1216,6 @@ class WattbikeApp(tk.Tk):
                 with file_path.open("r", encoding="utf-8", errors="replace") as f:
                     reader = csv.DictReader(f)
                     for r in reader:
-                        # Assicura tipi e compatibilità
                         if r.get("elapsed_s") is not None and str(r.get("elapsed_s")).strip() != "":
                             rows.append(r)
             else:
@@ -1070,7 +1237,6 @@ class WattbikeApp(tk.Tk):
             clean = deduplicate_session_rows(rows)
             self._last_rows = clean
 
-            # Popola la cronologia dei grafici
             self._power_hist.clear()
             self._cad_hist.clear()
             self._pkt_count = len(clean)
@@ -1119,7 +1285,7 @@ class WattbikeApp(tk.Tk):
         path = filedialog.asksaveasfilename(
             title="Salva CSV",
             defaultextension=".csv",
-            filetypes=[("CSV", "*.csv")],
+            filetypes=[("CSV (*.csv)", "*.csv")],
         )
         if not path:
             return
@@ -1166,10 +1332,11 @@ class WattbikeApp(tk.Tk):
 
     def _bootstrap_drivers_async(self) -> None:
         def worker() -> None:
-            from .drivers import diagnose_stick, ensure_windows_driver, open_zadig_async
+            from .drivers import open_zadig_fallback, prepare_plug_and_play
 
-            st = diagnose_stick()
-            self.after(0, lambda: self._after_bootstrap(st, open_zadig_async))
+            self._status_queue.put("Preparazione driver ANT+…")
+            st = prepare_plug_and_play(on_status=lambda s: self._status_queue.put(s))
+            self.after(0, lambda: self._after_bootstrap(st, open_zadig_fallback))
 
         threading.Thread(target=worker, daemon=True, name="ant-boot").start()
 
@@ -1180,9 +1347,9 @@ class WattbikeApp(tk.Tk):
             self._run_driver_repair(open_zadig_fallback, silent=True)
 
     def _on_repair_drivers(self) -> None:
-        from .drivers import open_zadig_async
+        from .drivers import open_zadig_fallback
 
-        self._run_driver_repair(open_zadig_async, silent=False)
+        self._run_driver_repair(open_zadig_fallback, silent=False)
 
     def _run_driver_repair(self, open_zadig_fallback: Any, *, silent: bool) -> None:
         self._show_driver_log(clear=True)
@@ -1192,12 +1359,9 @@ class WattbikeApp(tk.Tk):
         self._set_status_and_driver_log("Configurazione driver in corso…")
 
         def worker() -> None:
-            from .drivers import ensure_windows_driver
+            from .drivers import ensure_drivers
 
-            res = ensure_windows_driver(
-                on_status=lambda s: self._status_queue.put(s),
-                on_output=lambda line: self._status_queue.put(line),
-            )
+            res = ensure_drivers(on_status=lambda s: self._status_queue.put(s))
             self.after(0, lambda: self._after_driver_install(res, open_zadig_fallback, silent=silent))
 
         threading.Thread(target=worker, daemon=True, name="driver-repair").start()
@@ -1205,9 +1369,9 @@ class WattbikeApp(tk.Tk):
     def _poll_stick_presence(self) -> None:
         if not self._busy and not self._recording:
             def worker() -> None:
-                from .drivers import diagnose_stick
+                from .drivers import diagnose
 
-                st = diagnose_stick()
+                st = diagnose()
 
                 def apply() -> None:
                     curr_present = bool(st.stick_present)
@@ -1220,9 +1384,9 @@ class WattbikeApp(tk.Tk):
                             and not self._driver_fix_attempted
                         ):
                             self._driver_fix_attempted = True
-                            from .drivers import open_zadig_async
+                            from .drivers import open_zadig_fallback
 
-                            self._run_driver_repair(open_zadig_async, silent=True)
+                            self._run_driver_repair(open_zadig_fallback, silent=True)
                             return
                     self._apply_driver_status(st, announce=False)
 
@@ -1230,7 +1394,6 @@ class WattbikeApp(tk.Tk):
 
             threading.Thread(target=worker, daemon=True, name="ant-poll").start()
 
-            # Poll Bluetooth periodico
             self._ble_poll_tick += 1
             if self._ble_poll_tick % 8 == 1:
                 def ble_worker() -> None:

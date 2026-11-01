@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.1
+
+- Sostituite tutte le emoji con icone grafiche native 16x16 pixel in stile Windows classico
+- Nomi modalità semplificati in «Picco Singolo» e «Picco Multiplo» (rimosse le parentesi e suffissi)
+- Risolto bug e lag nel passaggio tra schede: transizione istantanea senza reflow, rendering immediato dei dati e fix thread driver
+- Migliorato auto-updater macOS: supporto per aggiornamenti di bundle `.app` protetti in `/Applications` tramite prompt amministratore nativo
+
 ## 1.6.0
 
 - Deduplicazione cross-source in tempo reale tra ANT+ e Bluetooth LE (CPS) sullo stesso evento

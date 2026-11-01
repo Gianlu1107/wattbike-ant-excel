@@ -381,9 +381,12 @@ def _install_macos(current_exe: Path, payload: Path, status: Callable[[str], Non
 PID={os.getpid()}
 while kill -0 "$PID" 2>/dev/null; do sleep 1; done
 xattr -cr "{app}" 2>/dev/null || true
-rm -rf "{dest}"
-cp -R "{app}" "{dest}"
-xattr -cr "{dest}" 2>/dev/null || true
+if rm -rf "{dest}" 2>/dev/null; then
+    cp -R "{app}" "{dest}"
+    xattr -cr "{dest}" 2>/dev/null || true
+else
+    osascript -e "do shell script \\"rm -rf '{dest}' && cp -R '{app}' '{dest}' && xattr -cr '{dest}'\\" with administrator privileges"
+fi
 open "{dest}"
 rm -rf "{payload.parent}" 2>/dev/null || true
 rm -f "$0"
