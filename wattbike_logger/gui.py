@@ -1448,6 +1448,7 @@ class WattbikeApp(tk.Tk):
         if not messagebox.askyesno(
             "Aggiornamento",
             f"È disponibile la versione {info.version} (ora hai {__version__}).\n\nScaricare e installare ora?",
+            parent=self,
         ):
             return
         self._set_status("Download aggiornamento…")

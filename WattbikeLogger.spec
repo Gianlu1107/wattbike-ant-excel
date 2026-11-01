@@ -50,6 +50,8 @@ except Exception:
     pass
 
 hiddenimports = [
+    "certifi",
+    "ssl",
     "usb",
     "usb.backend.libusb1",
     "usb.backend.libusb0",

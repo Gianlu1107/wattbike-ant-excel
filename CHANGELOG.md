@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.2
+
+- **Auto-updater macOS & Cross-Platform Fixes**:
+  - Risolta la verifica certificati SSL su macOS frozen: caricamento automatico delle CA di sistema (`/etc/ssl/cert.pem` e `certifi`) evitando fallimenti silenziosi del controllo release.
+  - Sostituito `sys.exit(0)` con `os._exit(0)` nel thread di aggiornamento per consentire l'uscita immediata del processo principale e l'esecuzione corretta dello script di sostituzione.
+  - Prioritizzazione del pacchetto nativo `.pkg` quando `/Applications/WattbikeLogger.app` richiede privilegi di root.
+  - `postinstall` configurato per garantire i permessi al gruppo `admin` per futuri aggiornamenti diretti in-place senza prompt password.
+
 ## 1.6.1
 
 - Sostituite tutte le emoji con icone grafiche native 16x16 pixel in stile Windows classico

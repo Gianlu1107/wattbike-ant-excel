@@ -5,6 +5,9 @@ APP="/Applications/WattbikeLogger.app"
 if [[ -d "$APP" ]]; then
   xattr -cr "$APP" 2>/dev/null || true
   chmod -R a+rX "$APP" || true
+  # Consente aggiornamenti automatici senza password per gli utenti nel gruppo admin
+  chown -R root:admin "$APP" || true
+  chmod -R g+w "$APP" || true
   # Apri solo in installazioni interattive (non aggiornamenti silenziosi)
   if [[ "${COMMAND_LINE_INSTALL:-}" != "1" ]]; then
     open "$APP" || true

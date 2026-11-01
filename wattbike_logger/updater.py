@@ -6,6 +6,7 @@ import json
 import os
 import platform
 import shutil
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -20,6 +21,47 @@ from . import __version__
 GITHUB_REPO = "Gianlu1107/wattbike-ant-excel"
 API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 USER_AGENT = f"wattbike-logger/{__version__}"
+
+
+def _ensure_ca_certs() -> None:
+    """Configura certificati CA di sistema (essenziale su macOS frozen senza framework Python utente)."""
+    if os.environ.get("SSL_CERT_FILE") and os.path.isfile(os.environ["SSL_CERT_FILE"]):
+        return
+    ca_candidates = [
+        "/etc/ssl/cert.pem",
+        "/opt/homebrew/etc/ca-certificates/cert.pem",
+        "/opt/homebrew/etc/openssl@3/cert.pem",
+        "/etc/ssl/certs/ca-certificates.crt",
+        "/etc/pki/tls/certs/ca-bundle.crt",
+    ]
+    try:
+        import certifi
+
+        ca_candidates.insert(0, certifi.where())
+    except ImportError:
+        pass
+    for ca in ca_candidates:
+        if ca and os.path.isfile(ca):
+            os.environ["SSL_CERT_FILE"] = str(ca)
+            break
+
+
+_ensure_ca_certs()
+
+
+def _ssl_context() -> ssl.SSLContext:
+    _ensure_ca_certs()
+    try:
+        ctx = ssl.create_default_context()
+    except Exception:
+        ctx = ssl._create_unverified_context()
+    ca_file = os.environ.get("SSL_CERT_FILE")
+    if ca_file and os.path.isfile(ca_file):
+        try:
+            ctx.load_verify_locations(cafile=ca_file)
+        except Exception:
+            pass
+    return ctx
 
 
 @dataclass
@@ -62,7 +104,7 @@ def _http_json(url: str, timeout: float = 12.0) -> dict:
             "X-GitHub-Api-Version": "2022-11-28",
         },
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
@@ -102,9 +144,15 @@ def _pick_asset(assets: list[dict]) -> dict | None:
                 s += 40 - i * 5
                 break
         if lower.endswith(".zip"):
-            s += 30  # preferisci zip .app per auto-update (client vecchi non gestiscono .pkg)
+            s += 30  # preferisci zip .app per auto-update quando scrivibile
         if lower.endswith(".pkg") or lower.endswith(".msi") or lower.endswith(".deb") or "setup" in lower:
             s += 20  # installer nativo (download manuale / client nuovi)
+        if sys.platform == "darwin":
+            dest_app = Path("/Applications/WattbikeLogger.app")
+            # Se la cartella /Applications/WattbikeLogger.app esiste ma non è scrivibile dall'utente corrente,
+            # privilegia .pkg che eleva i permessi tramite l'Installer di macOS
+            if dest_app.exists() and not os.access(dest_app, os.W_OK) and lower.endswith(".pkg"):
+                s += 25
         if "wattbike" in lower:
             s += 3
         if sys.platform != "darwin" and "macos" in lower:
@@ -160,7 +208,7 @@ def download_file(
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=120) as resp:
+    with urllib.request.urlopen(req, timeout=120, context=_ssl_context()) as resp:
         total = int(resp.headers.get("Content-Length") or 0)
         done = 0
         with dest.open("wb") as fh:
@@ -244,7 +292,7 @@ def _open_native_installer(path: Path, status: Callable[[str], None]) -> None:
         except OSError:
             pass
         subprocess.Popen(["open", str(path)], start_new_session=True)
-        sys.exit(0)
+        os._exit(0)
     if lower.endswith(".msi") or (lower.endswith(".exe") and "setup" in lower):
         status("Avvio Setup Windows…")
         tmp = path.parent
@@ -266,7 +314,7 @@ del "%~f0" >NUL 2>&1
         )
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
         subprocess.Popen(["cmd.exe", "/c", str(bat)], creationflags=flags, close_fds=True)
-        sys.exit(0)
+        os._exit(0)
     if lower.endswith(".deb"):
         status("Apertura pacchetto .deb…")
         opener = shutil.which("xdg-open") or shutil.which("gnome-open")
@@ -274,7 +322,7 @@ del "%~f0" >NUL 2>&1
             subprocess.Popen([opener, str(path)], start_new_session=True)
         else:
             subprocess.Popen(["pkexec", "dpkg", "-i", str(path)], start_new_session=True)
-        sys.exit(0)
+        os._exit(0)
     raise RuntimeError(f"Formato installer non gestito: {path.name}")
 
 
@@ -396,7 +444,7 @@ rm -f "$0"
         os.chmod(sh, 0o755)
         subprocess.Popen(["/bin/bash", str(sh)], start_new_session=True)
         status("Riavvio in corso...")
-        sys.exit(0)
+        os._exit(0)
 
     new_bin = payload if payload.is_file() else _find_in_tree(payload, ("WattbikeLogger*",))
     if new_bin is None or not new_bin.is_file():
@@ -444,7 +492,7 @@ del "%~f0" >NUL 2>&1
         close_fds=True,
     )
     status("Riavvio in corso...")
-    sys.exit(0)
+    os._exit(0)
 
 
 def _install_posix(current_exe: Path, new_file: Path, status: Callable[[str], None]) -> None:
@@ -485,7 +533,7 @@ rm -f "$0"
         os.chmod(sh, 0o755)
         subprocess.Popen(["/bin/bash", str(sh)], start_new_session=True)
         status("Riavvio in corso...")
-        sys.exit(0)
+        os._exit(0)
 
     status("Riavvio...")
     os.execv(str(current_exe), [str(current_exe)])

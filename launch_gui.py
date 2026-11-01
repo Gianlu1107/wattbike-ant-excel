@@ -35,6 +35,22 @@ def _silence_console_when_frozen() -> None:
         pass
 
 
+def _ensure_ca_certs() -> None:
+    if os.environ.get("SSL_CERT_FILE") and os.path.isfile(os.environ["SSL_CERT_FILE"]):
+        return
+    for ca in (
+        "/etc/ssl/cert.pem",
+        "/opt/homebrew/etc/ca-certificates/cert.pem",
+        "/opt/homebrew/etc/openssl@3/cert.pem",
+        "/etc/ssl/certs/ca-certificates.crt",
+        "/etc/pki/tls/certs/ca-bundle.crt",
+    ):
+        if os.path.isfile(ca):
+            os.environ["SSL_CERT_FILE"] = ca
+            break
+
+
+_ensure_ca_certs()
 _silence_console_when_frozen()
 
 from wattbike_logger.__main__ import main
