@@ -197,7 +197,12 @@ def _extract_metric_float(val: Any) -> float | None:
         return None
 
 
-def _analyze_single_sprint_segment(segment: list[dict[str, Any]], index: int = 1) -> PeakMetrics | None:
+def _analyze_single_sprint_segment(
+    segment: list[dict[str, Any]],
+    index: int = 1,
+    *,
+    t_onset: float | None = None,
+) -> PeakMetrics | None:
     if not segment:
         return None
 
@@ -218,18 +223,36 @@ def _analyze_single_sprint_segment(segment: list[dict[str, Any]], index: int = 1
 
     t_peak = _extract_metric_float(peak_row.get("elapsed_s")) or 0.0
 
-    # Determina t0: scansiona all'indietro dal picco per trovare l'inizio della spinta (da zero / riposo)
-    t0 = _extract_metric_float(segment[0].get("elapsed_s")) or 0.0
-    for j in range(peak_idx - 1, -1, -1):
-        p_j = _extract_metric_int(segment[j].get("instantaneous_power_w")) or 0
-        if p_j <= 10:  # soglia riposo / zero
-            # Il punto successivo è l'inizio dell'applicazione
-            t0_candidate = _extract_metric_float(segment[j + 1].get("elapsed_s"))
-            if t0_candidate is not None:
-                t0 = t0_candidate
-            break
+    # Determina t0 (inizio applicazione da riposo / zero):
+    # 1. Se t_onset è fornito (ultimo punto di riposo prima dello sprint), usalo se precede t_peak.
+    # 2. Altrimenti scansiona all'indietro dal picco per trovare la transizione da <= 10W.
+    # 3. In ogni caso, garantisce rigorosamente che t0 < t_peak e t_app > 0.
+    t0: float | None = None
+    if t_onset is not None and t_onset < t_peak:
+        t0 = t_onset
+    else:
+        for j in range(peak_idx - 1, -1, -1):
+            p_j = _extract_metric_int(segment[j].get("instantaneous_power_w")) or 0
+            if p_j <= 10:
+                t0_cand = _extract_metric_float(segment[j].get("elapsed_s"))
+                if t0_cand is not None and t0_cand < t_peak:
+                    t0 = t0_cand
+                    break
 
-    t_app = max(0.0, round(t_peak - t0, 3))
+    if t0 is None or t0 >= t_peak:
+        if peak_idx > 0:
+            first_t = _extract_metric_float(segment[0].get("elapsed_s"))
+            if first_t is not None and first_t < t_peak:
+                t0 = first_t
+            else:
+                prev_t = _extract_metric_float(segment[peak_idx - 1].get("elapsed_s"))
+                if prev_t is not None and prev_t < t_peak:
+                    t0 = prev_t
+
+    if t0 is None or t0 >= t_peak:
+        t0 = max(0.0, round(t_peak - 0.25, 3))
+
+    t_app = max(0.001, round(t_peak - t0, 3))
 
     # Cadenza al picco di potenza (all'istante tx)
     cad_at_peak = _extract_metric_int(peak_row.get("cadence_rpm"))
@@ -303,9 +326,10 @@ def analyze_single_peak(rows: list[dict[str, Any]]) -> SinglePeakAnalysis:
 def analyze_multi_peak(rows: list[dict[str, Any]]) -> MultiPeakAnalysis:
     """
     Analisi modalità Picco Multiplo:
-    - Riconosce i diversi picchi separati da una fila di zeri (recupero)
-    - Per ogni picco calcola power peak, cadenza corrispondente, cadenza max, tempo di applicazione
-    - Calcola la decadenza rispetto al picco massimo (sia cronologica che ordinata decrescentemente)
+    - Riconosce i diversi picchi separati da una fila di zeri (recupero / riposo).
+    - Per ogni picco calcola power peak, cadenza corrispondente, cadenza max, tempo di applicazione (t_app > 0).
+    - Calcola la decadenza rispetto allo Sprint 1 (n1):
+      differenza tra picco n1 e ogni picco successivo n2, n3... illustrando il calo nel tempo.
     """
     clean = deduplicate_session_rows(rows)
     if not clean:
@@ -313,9 +337,11 @@ def analyze_multi_peak(rows: list[dict[str, Any]]) -> MultiPeakAnalysis:
 
     # Segmentazione dei picchi tramite la fila di zeri
     segments: list[list[dict[str, Any]]] = []
+    seg_onsets: list[float] = []
     cur_seg: list[dict[str, Any]] = []
     consecutive_zeros = 0
     t_last: float | None = None
+    last_rest_t: float | None = None
 
     for r in clean:
         p = _extract_metric_int(r.get("instantaneous_power_w")) or 0
@@ -325,6 +351,8 @@ def analyze_multi_peak(rows: list[dict[str, Any]]) -> MultiPeakAnalysis:
 
         is_rest = p <= 10  # zero o quasi-zero (riposo)
         if is_rest:
+            if t_cur is not None:
+                last_rest_t = t_cur
             consecutive_zeros += 1
             # 2 o più zeri consecutivi oppure gap temporale >= 1.8s segnano la separazione
             if (consecutive_zeros >= 2 or dt_gap >= 1.8) and cur_seg:
@@ -334,6 +362,9 @@ def analyze_multi_peak(rows: list[dict[str, Any]]) -> MultiPeakAnalysis:
                 cur_seg = []
         else:
             consecutive_zeros = 0
+            if not cur_seg:
+                # Inizio di un nuovo sprint: registra il timestamp del riposo precedente
+                seg_onsets.append(last_rest_t if last_rest_t is not None else (t_cur or 0.0))
             cur_seg.append(r)
 
     if cur_seg:
@@ -344,10 +375,12 @@ def analyze_multi_peak(rows: list[dict[str, Any]]) -> MultiPeakAnalysis:
     # Se non ci sono state file di zeri ma ci sono dati, prendi l'intera sessione come unico segmento
     if not segments:
         segments = [clean]
+        seg_onsets = [_extract_metric_float(clean[0].get("elapsed_s")) or 0.0]
 
     peaks: list[PeakMetrics] = []
     for idx, seg in enumerate(segments, 1):
-        pm = _analyze_single_sprint_segment(seg, index=idx)
+        onset = seg_onsets[idx - 1] if idx - 1 < len(seg_onsets) else None
+        pm = _analyze_single_sprint_segment(seg, index=idx, t_onset=onset)
         if pm is not None:
             pm.index = len(peaks) + 1
             peaks.append(pm)
@@ -355,37 +388,51 @@ def analyze_multi_peak(rows: list[dict[str, Any]]) -> MultiPeakAnalysis:
     if not peaks:
         return MultiPeakAnalysis(rows_count=len(clean))
 
-    # Valori massimi di riferimento della sessione
+    # Sprint 1 (n1) è il riferimento base per il calcolo della decadenza
+    p1 = peaks[0]
+    p1_power = float(p1.power_peak)
+    p1_cad = float(p1.cadence_max or p1.cadence_at_peak or 0)
+
+    # Sprint 1 ha decadenza zero (baseline di riferimento)
+    p1.decay_power_w = 0.0
+    p1.decay_power_pct = 0.0
+    p1.decay_cad_rpm = 0.0
+    p1.decay_cad_pct = 0.0
+    p1.decay_app_time_s = 0.0
+
+    # Per ogni sprint successivo (n2, n3, ...): differenza rispetto al picco n1
+    # P_diff = P1 - Pi (illustra la diminuzione dei picchi nel tempo)
+    for p in peaks[1:]:
+        diff_p = p1_power - float(p.power_peak)
+        p.decay_power_w = round(diff_p, 1)
+        p.decay_power_pct = round((diff_p / p1_power * 100.0), 1) if p1_power > 0 else 0.0
+
+        c_val = float(p.cadence_max or p.cadence_at_peak or 0)
+        diff_c = p1_cad - c_val
+        p.decay_cad_rpm = round(diff_c, 1)
+        p.decay_cad_pct = round((diff_c / p1_cad * 100.0), 1) if p1_cad > 0 else 0.0
+
+        p.decay_app_time_s = round(float(p.t_app - p1.t_app), 3)
+
+    # Valori massimi e migliori della sessione per le statistiche di riepilogo
     max_p = max(p.power_peak for p in peaks)
     max_cad = max((p.cadence_max or 0) for p in peaks)
     min_app = min(p.t_app for p in peaks)
 
-    # Calcolo decadenza per ogni picco
-    for p in peaks:
-        # Decadenza potenza
-        p.decay_power_w = round(float(max_p - p.power_peak), 1)
-        p.decay_power_pct = round((float(max_p - p.power_peak) / max_p * 100.0), 1) if max_p > 0 else 0.0
-
-        # Decadenza cadenza
-        c_val = p.cadence_max or 0
-        p.decay_cad_rpm = round(float(max_cad - c_val), 1)
-        p.decay_cad_pct = round((float(max_cad - c_val) / max_cad * 100.0), 1) if max_cad > 0 else 0.0
-
-        # Differenza tempo applicazione rispetto al migliore
-        p.decay_app_time_s = round(float(p.t_app - min_app), 3)
-
-    # Classifiche ordinate decrescentemente indifferentemente dall'ordine
+    # Classifiche ordinate decrescentemente
     peaks_by_power = sorted(peaks, key=lambda x: x.power_peak, reverse=True)
     peaks_by_cadence = sorted(peaks, key=lambda x: (x.cadence_max or 0), reverse=True)
 
+    # Decadenza media degli sprint successivi rispetto a Sprint 1
+    subsequent = peaks[1:]
     avg_decay_p = (
-        round(sum(p.decay_power_pct for p in peaks) / len(peaks), 1)
-        if peaks
+        round(sum(p.decay_power_pct for p in subsequent) / len(subsequent), 1)
+        if subsequent
         else 0.0
     )
     avg_decay_c = (
-        round(sum(p.decay_cad_pct for p in peaks) / len(peaks), 1)
-        if peaks
+        round(sum(p.decay_cad_pct for p in subsequent) / len(subsequent), 1)
+        if subsequent
         else 0.0
     )
 

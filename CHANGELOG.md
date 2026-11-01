@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.4
+
+- **Fix Analisi Sportiva & Grafici Telemetria**:
+  - Risolto bug calcolo `t0` e tempo di applicazione `t_app`: eliminata l'uguaglianza non valida $t_0 == t_x$ ($t_{\text{app}} = 0$). Il punto di inizio applicazione $t_0$ rileva correttamente la transizione dal riposo/zero garantendo $t_0 < t_x$ e $t_{\text{app}} > 0$.
+  - Ricalcolata la decadenza per i picchi multipli secondo la specifica sportiva: lo Sprint 1 ($n_1$) funge da riferimento base (`— (Base)`); per ogni sprint successivo ($n_2, n_3, \dots$) la decadenza $\Delta\text{Watt}$ e $\%$ è calcolata rispetto a $n_1$, illustrando chiaramente il decremento delle prestazioni nel tempo.
+  - Aggiunti i marcatori e label dei picchi di cadenza sul grafico «Cadenza Istantanea» (allineati ai picchi sprint).
+  - Eliminati gli artefatti e i cappi grafici (overshoots da interpolazione spline `smooth=True`) nei tracciati di potenza e cadenza, rendendo il rendering fedele e pulito.
+
 ## 1.6.3
 
 - **Restyling e Polish Completo UI Windows Classic**:

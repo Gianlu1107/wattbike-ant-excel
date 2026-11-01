@@ -143,6 +143,10 @@ def _build_analysis_sheet(
             cell.alignment = center_align
 
         for pk in analysis.peaks:
+            dec_p_w = "— (Base)" if pk.index == 1 else pk.decay_power_w
+            dec_p_pct = "—" if pk.index == 1 else f"{pk.decay_power_pct:.1f}%"
+            dec_c_rpm = "—" if pk.index == 1 else pk.decay_cad_rpm
+            dec_c_pct = "—" if pk.index == 1 else f"{pk.decay_cad_pct:.1f}%"
             ws.append([
                 f"Picco {pk.index}",
                 pk.t0,
@@ -152,10 +156,10 @@ def _build_analysis_sheet(
                 pk.cadence_at_peak or "—",
                 pk.cadence_max or "—",
                 pk.torque_at_peak if pk.torque_at_peak is not None else "—",
-                pk.decay_power_w,
-                f"{pk.decay_power_pct:.1f}%",
-                pk.decay_cad_rpm,
-                f"{pk.decay_cad_pct:.1f}%",
+                dec_p_w,
+                dec_p_pct,
+                dec_c_rpm,
+                dec_c_pct,
             ])
             r = ws.max_row
             for c in range(1, len(tbl1_cols) + 1):
@@ -169,7 +173,7 @@ def _build_analysis_sheet(
             "Rank",
             "Sprint Orig.",
             "Potenza Picco (W)",
-            "Decadenza vs Max (W)",
+            "Decadenza vs Sprint #1 (W)",
             "Decadenza (%)",
             "Cadenza @ Picco (rpm)",
             "Tempo Appl. (s)",

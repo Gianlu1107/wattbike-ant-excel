@@ -85,7 +85,9 @@ class WattbikeApp(tk.Tk):
         self._countdown_job: str | None = None
         self._power_hist: deque[tuple[float, float]] = deque(maxlen=360)
         self._cad_hist: deque[tuple[float, float]] = deque(maxlen=360)
-        self._peak_markers: list[tuple[float, float, str]] = []
+        self._power_peak_markers: list[tuple[float, float, str]] = []
+        self._cad_peak_markers: list[tuple[float, float, str]] = []
+        self._peak_markers = self._power_peak_markers
         self._last_rows: list[dict[str, Any]] = []
         self._last_analysis: SinglePeakAnalysis | MultiPeakAnalysis | None = None
         self._redraw_job: str | None = None
@@ -701,6 +703,7 @@ class WattbikeApp(tk.Tk):
         self.canvas_cad = self._make_chart(
             wrap, "Cadenza Istantanea", "rpm", _CAD_COLOR, y_default=(0.0, 120.0), show_xlabel=True
         )
+        self.canvas_cad._show_peaks = True  # type: ignore[attr-defined]
         self._redraw_plots()
 
     def _make_chart(
@@ -766,7 +769,13 @@ class WattbikeApp(tk.Tk):
                 break
         return ticks or [lo, hi]
 
-    def _draw_series(self, canvas: tk.Canvas, series: deque[tuple[float, float]]) -> None:
+    def _draw_series(
+        self,
+        canvas: tk.Canvas,
+        series: deque[tuple[float, float]],
+        *,
+        markers: list[tuple[float, float, str]] | None = None,
+    ) -> None:
         # Non ridisegnare se la canvas non è mappata a schermo (es. tab nascosto)
         if not canvas.winfo_ismapped():
             return
@@ -852,7 +861,8 @@ class WattbikeApp(tk.Tk):
             canvas.create_polygon(*poly, fill=color, outline="", stipple="gray50")
         except tk.TclError:
             pass
-        canvas.create_line(*pts, fill=color, width=2.0, smooth=True)
+        # Disegno lineare senza smooth=True per evitare cappi, overshoots o artefatti spline
+        canvas.create_line(*pts, fill=color, width=1.8)
 
         lx, ly = sx(series[-1][0]), sy(series[-1][1])
         canvas.create_oval(lx - 3, ly - 3, lx + 3, ly + 3, fill=color, outline="")
@@ -865,8 +875,9 @@ class WattbikeApp(tk.Tk):
             font=_UI_FONT_SMALL,
         )
 
-        if getattr(canvas, "_show_peaks", False) and self._peak_markers:
-            for p_time, p_val, p_lbl in self._peak_markers:
+        active_markers = markers if markers is not None else self._peak_markers
+        if getattr(canvas, "_show_peaks", False) and active_markers:
+            for p_time, p_val, p_lbl in active_markers:
                 if xmin <= p_time <= xmax:
                     cx = sx(p_time)
                     cy = sy(p_val)
@@ -965,9 +976,9 @@ class WattbikeApp(tk.Tk):
 
     def _redraw_plots(self) -> None:
         if getattr(self, "canvas_power", None) is not None:
-            self._draw_series(self.canvas_power, self._power_hist)
+            self._draw_series(self.canvas_power, self._power_hist, markers=self._power_peak_markers)
         if getattr(self, "canvas_cad", None) is not None:
-            self._draw_series(self.canvas_cad, self._cad_hist)
+            self._draw_series(self.canvas_cad, self._cad_hist, markers=self._cad_peak_markers)
 
     def _on_start(self) -> None:
         if self._recording or self._busy:
@@ -987,7 +998,8 @@ class WattbikeApp(tk.Tk):
 
         self._power_hist.clear()
         self._cad_hist.clear()
-        self._peak_markers.clear()
+        self._power_peak_markers.clear()
+        self._cad_peak_markers.clear()
         self._pkt_count = 0
         self._power_sum = 0.0
         self._t0 = None
@@ -1163,7 +1175,8 @@ class WattbikeApp(tk.Tk):
         analysis = analyze_session(clean, mode=mode)
         self._last_analysis = analysis
 
-        self._peak_markers.clear()
+        self._power_peak_markers.clear()
+        self._cad_peak_markers.clear()
 
         if isinstance(analysis, SinglePeakAnalysis):
             pk = analysis.peak
@@ -1185,7 +1198,11 @@ class WattbikeApp(tk.Tk):
                     f"Durata sforzo: {pk.duration:.2f} s  |  "
                     f"Istante cadenza max: {pk.t_cad_max or '—'} s"
                 )
-                self._peak_markers.append((pk.t_peak, float(pk.power_peak), f"{pk.power_peak}W @ {pk.t_peak:.1f}s"))
+                self._power_peak_markers.append((pk.t_peak, float(pk.power_peak), f"{pk.power_peak}W @ {pk.t_peak:.1f}s"))
+                c_val = float(pk.cadence_max or pk.cadence_at_peak or 0)
+                t_c = pk.t_cad_max or pk.t_peak
+                if c_val > 0:
+                    self._cad_peak_markers.append((t_c, c_val, f"{int(c_val)} rpm @ {t_c:.1f}s"))
             else:
                 self.lbl_single_details.configure(text="Nessun picco significativo rilevato.")
 
@@ -1201,7 +1218,11 @@ class WattbikeApp(tk.Tk):
             self.lbl_m_avg_decay_c[0].configure(text=f"{analysis.average_decay_cad_pct:.1f}%")
 
             for pk in analysis.peaks:
-                self._peak_markers.append((pk.t_peak, float(pk.power_peak), f"#{pk.index}: {pk.power_peak}W"))
+                self._power_peak_markers.append((pk.t_peak, float(pk.power_peak), f"#{pk.index}: {pk.power_peak}W"))
+                c_val = float(pk.cadence_max or pk.cadence_at_peak or 0)
+                t_c = pk.t_cad_max or pk.t_peak
+                if c_val > 0:
+                    self._cad_peak_markers.append((t_c, c_val, f"#{pk.index}: {int(c_val)} rpm"))
 
             self._refresh_multi_table()
 
@@ -1224,6 +1245,17 @@ class WattbikeApp(tk.Tk):
             peaks = self._last_analysis.peaks
 
         for pk in peaks:
+            if pk.index == 1:
+                dec_p_w_str = "— (Base)"
+                dec_p_pct_str = "—"
+                dec_c_rpm_str = "—"
+                dec_c_pct_str = "—"
+            else:
+                dec_p_w_str = f"{pk.decay_power_w:+.1f} W"
+                dec_p_pct_str = f"{pk.decay_power_pct:.1f}%"
+                dec_c_rpm_str = f"{pk.decay_cad_rpm:+.1f} rpm"
+                dec_c_pct_str = f"{pk.decay_cad_pct:.1f}%"
+
             self.tree_peaks.insert(
                 "",
                 tk.END,
@@ -1236,10 +1268,10 @@ class WattbikeApp(tk.Tk):
                     f"{pk.cadence_at_peak or '—'} rpm",
                     f"{pk.cadence_max or '—'} rpm",
                     f"{pk.torque_at_peak or '—'} Nm",
-                    f"{pk.decay_power_w:.1f} W",
-                    f"{pk.decay_power_pct:.1f}%",
-                    f"{pk.decay_cad_rpm:.1f} rpm",
-                    f"{pk.decay_cad_pct:.1f}%",
+                    dec_p_w_str,
+                    dec_p_pct_str,
+                    dec_c_rpm_str,
+                    dec_c_pct_str,
                 ),
             )
 
@@ -1283,43 +1315,47 @@ class WattbikeApp(tk.Tk):
                 messagebox.showwarning("File vuoto", "Nessun dato valido trovato nel file.")
                 return
 
-            clean = deduplicate_session_rows(rows)
-            self._last_rows = clean
-
-            self._power_hist.clear()
-            self._cad_hist.clear()
-            self._pkt_count = len(clean)
-
-            p_sum = 0.0
-            for r in clean:
-                t = float(r.get("elapsed_s") or 0.0)
-                p = r.get("instantaneous_power_w")
-                c = r.get("cadence_rpm")
-                if p is not None and str(p).strip() != "":
-                    p_val = float(p)
-                    self._power_hist.append((t, p_val))
-                    p_sum += p_val
-                if c is not None and str(c).strip() != "":
-                    self._cad_hist.append((t, float(c)))
-
-            self._power_sum = p_sum
-            if clean:
-                last_r = clean[-1]
-                self.lbl_power.configure(text=f"{last_r.get('instantaneous_power_w', '—')} W")
-                self.lbl_cadence.configure(text=f"{last_r.get('cadence_rpm', '—')} rpm")
-                self.lbl_torque.configure(text=f"{last_r.get('torque_nm', '—')} Nm")
-                dur = float(last_r.get("elapsed_s") or 0)
-                self.lbl_elapsed.configure(text=f"{int(dur)//60:02d}:{int(dur)%60:02d}")
-                avg_p = p_sum / len(clean) if clean else 0
-                self.lbl_avg.configure(text=f"{avg_p:.0f}")
-                self.lbl_packets.configure(text=str(len(clean)))
-
-            self._update_analysis(clean)
-            self.notebook.select(self.tab_report)
-            self._set_status(f"Aperto {file_path.name} ({len(clean)} righe deduplicate)")
-
+            self.load_rows(rows, filename=file_path.name)
         except Exception as exc:
             messagebox.showerror("Errore apertura", f"Impossibile leggere il file:\n{exc}")
+
+    def load_rows(self, rows: list[dict[str, Any]], filename: str = "") -> None:
+        """Carica un set di record di sessione, popolando grafici, metriche e report."""
+        clean = deduplicate_session_rows(rows)
+        self._last_rows = clean
+
+        self._power_hist.clear()
+        self._cad_hist.clear()
+        self._pkt_count = len(clean)
+
+        p_sum = 0.0
+        for r in clean:
+            t = float(r.get("elapsed_s") or 0.0)
+            p = r.get("instantaneous_power_w")
+            c = r.get("cadence_rpm")
+            if p is not None and str(p).strip() != "":
+                p_val = float(p)
+                self._power_hist.append((t, p_val))
+                p_sum += p_val
+            if c is not None and str(c).strip() != "":
+                self._cad_hist.append((t, float(c)))
+
+        self._power_sum = p_sum
+        if clean:
+            last_r = clean[-1]
+            self.lbl_power.configure(text=f"{last_r.get('instantaneous_power_w', '—')} W")
+            self.lbl_cadence.configure(text=f"{last_r.get('cadence_rpm', '—')} rpm")
+            self.lbl_torque.configure(text=f"{last_r.get('torque_nm', '—')} Nm")
+            dur = float(last_r.get("elapsed_s") or 0)
+            self.lbl_elapsed.configure(text=f"{int(dur)//60:02d}:{int(dur)%60:02d}")
+            avg_p = p_sum / len(clean) if clean else 0
+            self.lbl_avg.configure(text=f"{avg_p:.0f}")
+            self.lbl_packets.configure(text=str(len(clean)))
+
+        self._update_analysis(clean)
+        self.notebook.select(self.tab_report)
+        if filename:
+            self._set_status(f"Aperto {filename} ({len(clean)} righe deduplicate)")
 
     def _on_export_excel(self) -> None:
         if not self._last_rows:
