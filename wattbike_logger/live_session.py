@@ -60,6 +60,7 @@ class LiveSession:
         self._error: str | None = None
         self._ble = None
         self._last_ant_key: tuple[Any, ...] | None = None
+        self._recent_emitted: list[dict[str, Any]] = []
 
     def _notify_device(self, device_id: int, device_type: int | None) -> None:
         if self.found_device_id is None:
@@ -74,22 +75,71 @@ class LiveSession:
     def _emit_row(self, row: dict[str, Any]) -> None:
         if not row_has_metrics(row):
             return
-        # Dedup solo ritrasmissioni ANT identiche (stesso event_count + raw).
-        # Ogni event_count nuovo passa → massima frequenza utile; zeri inclusi.
-        if row.get("source", "ant+") == "ant+":
-            key = (
-                row.get("device_id"),
-                row.get("page"),
-                row.get("event_count"),
-                row.get("raw_bytes_hex"),
-            )
-            if key == self._last_ant_key:
-                return
-            self._last_ant_key = key
+
         with self._lock:
+            # 1) Dedup solo ritrasmissioni ANT identiche (stesso event_count + raw).
+            if row.get("source", "ant+") == "ant+":
+                key = (
+                    row.get("device_id"),
+                    row.get("page"),
+                    row.get("event_count"),
+                    row.get("raw_bytes_hex"),
+                )
+                if key == self._last_ant_key:
+                    return
+                self._last_ant_key = key
+
+            # 2) Dedup cross-source ANT+ <-> BLE e rate-limit zeri ravvicinati
+            t_curr = row.get("elapsed_s")
+            p_curr = row.get("instantaneous_power_w")
+            c_curr = row.get("cadence_rpm")
+            src_curr = row.get("source", "ant+")
+
+            if t_curr is not None:
+                for prev in reversed(self._recent_emitted):
+                    t_prev = prev.get("elapsed_s")
+                    if t_prev is None:
+                        continue
+                    dt = t_curr - t_prev
+                    if dt > 0.45:
+                        break
+                    p_prev = prev.get("instantaneous_power_w")
+                    c_prev = prev.get("cadence_rpm")
+                    src_prev = prev.get("source", "ant+")
+
+                    if src_curr != src_prev:
+                        # Duplicato cross-source: stessa potenza registrata da entrambe le radio entro 0.45s
+                        if p_curr is not None and p_curr > 0 and p_curr == p_prev:
+                            c1 = c_curr if c_curr is not None else 0
+                            c2 = c_prev if c_prev is not None else 0
+                            if abs(c1 - c2) <= 2 or c1 == 0 or c2 == 0:
+                                # Fondi eventuali metriche mancanti nel record precedente
+                                if prev.get("torque_nm") is None and row.get("torque_nm") is not None:
+                                    prev["torque_nm"] = row["torque_nm"]
+                                    prev["angular_velocity_rad_s"] = row.get("angular_velocity_rad_s")
+                                if (prev.get("left_power_w") is None or prev.get("right_power_w") is None) and (
+                                    row.get("left_power_w") is not None and row.get("right_power_w") is not None
+                                ):
+                                    prev["left_power_w"] = row["left_power_w"]
+                                    prev["right_power_w"] = row["right_power_w"]
+                                return
+                        # Zeri a riposo duplicati tra radio entro 0.22s
+                        if p_curr == 0 and p_prev == 0 and dt < 0.22:
+                            return
+                    else:
+                        # Stessa fonte: zeri duplicati troppo ravvicinati (< 0.22s)
+                        if p_curr == 0 and p_prev == 0 and dt < 0.22:
+                            return
+
             if not self.capturing:
                 return
+
+            self._recent_emitted.append(row)
+            if len(self._recent_emitted) > 16:
+                self._recent_emitted.pop(0)
+
             self.rows.append(row)
+
         if self.on_row:
             self.on_row(row)
 
@@ -260,6 +310,7 @@ class LiveSession:
             self.rows = []
             self._seen_events.clear()
             self._last_ant_key = None
+            self._recent_emitted.clear()
             self._started_at = time.time()
             self.capturing = True
         if self._ble is not None:

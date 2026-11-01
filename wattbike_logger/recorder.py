@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 from datetime import datetime
@@ -99,6 +100,23 @@ def _decode_payload(
             page_name = f"fe_page_0x{page:02X}"
         else:
             page_name = f"page_0x{page:02X}"
+
+    # Calcolo matematico coppia (Torque) e velocità angolare per ANT+ (P = τ * ω)
+    pwr = out.get("instantaneous_power_w")
+    cad = out.get("cadence_rpm")
+    if cad is not None:
+        if cad > 0:
+            omega = cad * (2.0 * math.pi / 60.0)
+            out["angular_velocity_rad_s"] = round(omega, 4)
+            if pwr is not None and omega > 0:
+                out["torque_nm"] = round(float(pwr) / omega, 3)
+        else:
+            out["angular_velocity_rad_s"] = 0.0
+            if pwr == 0:
+                out["torque_nm"] = 0.0
+    elif pwr == 0:
+        out["angular_velocity_rad_s"] = 0.0
+        out["torque_nm"] = 0.0
 
     out["page_name"] = page_name
     return out

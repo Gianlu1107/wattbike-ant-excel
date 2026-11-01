@@ -41,3 +41,14 @@ def get_device_id_pref(default: int = 0) -> int:
 
 def set_device_id_pref(device_id: int) -> None:
     save_prefs({"device_id": int(device_id)})
+
+
+def get_test_mode_pref(default: str = "single") -> str:
+    """Modalità di test: 'single' (Picco singolo) o 'multi' (Picco multiplo)."""
+    val = str(load_prefs().get("test_mode", default)).lower()
+    return val if val in ("single", "multi") else default
+
+
+def set_test_mode_pref(mode: str) -> None:
+    val = "multi" if mode == "multi" else "single"
+    save_prefs({"test_mode": val})

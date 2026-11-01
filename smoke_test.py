@@ -29,6 +29,40 @@ def main() -> None:
     assert d["instantaneous_power_w"] == 34
     assert d["cadence_rpm"] == 37
     assert d["left_power_w"] == 15 and d["right_power_w"] == 19
+    # Verifica calcolo matematico della coppia per ANT+
+    assert d["torque_nm"] == 8.775
+    assert d["angular_velocity_rad_s"] == 3.8746
+
+    # Test analisi picco singolo e multiplo
+    from wattbike_logger.analysis import analyze_session, deduplicate_session_rows
+    demo_sprint = [
+        {"elapsed_s": 0.0, "source": "ant+", "instantaneous_power_w": 0, "cadence_rpm": 0},
+        {"elapsed_s": 1.0, "source": "ant+", "instantaneous_power_w": 200, "cadence_rpm": 80},
+        {"elapsed_s": 2.0, "source": "ant+", "instantaneous_power_w": 500, "cadence_rpm": 100},
+        {"elapsed_s": 2.02, "source": "ble", "instantaneous_power_w": 500, "cadence_rpm": 100},  # duplicato BLE
+        {"elapsed_s": 3.0, "source": "ant+", "instantaneous_power_w": 300, "cadence_rpm": 90},
+        {"elapsed_s": 4.0, "source": "ant+", "instantaneous_power_w": 0, "cadence_rpm": 0},
+        {"elapsed_s": 5.0, "source": "ant+", "instantaneous_power_w": 0, "cadence_rpm": 0},
+        {"elapsed_s": 6.0, "source": "ant+", "instantaneous_power_w": 400, "cadence_rpm": 95},
+        {"elapsed_s": 7.0, "source": "ant+", "instantaneous_power_w": 0, "cadence_rpm": 0},
+    ]
+    clean_demo = deduplicate_session_rows(demo_sprint)
+    assert len(clean_demo) == len(demo_sprint) - 1  # 1 duplicato scartato
+
+    sp = analyze_session(clean_demo, mode="single")
+    assert sp.peak is not None
+    assert sp.peak.power_peak == 500
+    assert sp.peak.t_peak == 2.0
+    assert sp.peak.t0 == 1.0
+    assert sp.peak.t_app == 1.0
+    assert sp.peak.cadence_at_peak == 100
+
+    mp = analyze_session(clean_demo, mode="multi")
+    assert mp.total_peaks == 2
+    assert mp.max_power_peak == 500
+    assert mp.peaks[0].power_peak == 500 and mp.peaks[0].decay_power_w == 0.0
+    assert mp.peaks[1].power_peak == 400 and mp.peaks[1].decay_power_w == 100.0
+    assert mp.peaks[1].decay_power_pct == 20.0
 
     # BLE CPS Wattbike (da sessione reale): stessi campi ANT-like
     ble = parse_cycling_power_measurement(bytes.fromhex("094f560059720a520018006e000b0300"))

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.6.0
+
+- Deduplicazione cross-source in tempo reale tra ANT+ e Bluetooth LE (CPS) sullo stesso evento
+- Calcolo matematico automatico della coppia (Torque $\tau = P / \omega$) e velocità angolare anche per ANT+
+- Nuove modalità di analisi sportiva: **Picco Singolo** (TTP / Sprint Max) e **Picco Multiplo** (Repeated Sprints con decadenza)
+- Riconoscimento e segmentazione dei picchi multipli tramite la fila di zeri (intervallo di recupero)
+- Calcolo indice di decadenza (Fatigue Index): differenza in Watt/% dal picco massimo assoluto e dalla cadenza massima; classifiche ordinate cronologicamente e decrescentemente
+- Polish UI stile Windows classico: Notebook a 2 schede («Monitor Live & Grafici» e «Report Analisi Risultati»), 6 riquadri metriche live con Coppia (Nm), marcatori dei picchi sul grafico, pulsante «Apri CSV/Excel»
+- Foglio «analisi» formattato automaticamente nell'export Excel (`.xlsx`) accanto ai fogli «raw» e «meta»
+
 ## 1.5.4
 
 - BLE: max frequenza sui payload nuovi; dedup solo spam identico; zeri a riposo ~4 Hz
