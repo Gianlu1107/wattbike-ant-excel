@@ -435,11 +435,11 @@ PID={os.getpid()}
 while kill -0 "$PID" 2>/dev/null; do sleep 1; done
 xattr -cr "{app}" 2>/dev/null || true
 if rm -rf "{dest}" 2>/dev/null; then
-    cp -R "{app}" "{dest}"
+    /usr/bin/ditto "{app}" "{dest}"
     chmod -R a+rX "{dest}" 2>/dev/null || true
     xattr -cr "{dest}" 2>/dev/null || true
 else
-    osascript -e "do shell script \\"rm -rf '{dest}' && cp -R '{app}' '{dest}' && chmod -R a+rX '{dest}' && xattr -cr '{dest}'\\" with administrator privileges"
+    osascript -e "do shell script \\"rm -rf '{dest}' && /usr/bin/ditto '{app}' '{dest}' && chmod -R a+rX '{dest}' && xattr -cr '{dest}'\\" with administrator privileges"
 fi
 open "{dest}"
 rm -rf "{payload.parent}" 2>/dev/null || true
