@@ -234,10 +234,15 @@ def _unpack_if_zip(path: Path, tmp_dir: Path) -> Path:
     """Se path è uno zip, lo estrae e restituisce la cartella; altrimenti path."""
     if path.suffix.lower() != ".zip":
         return path
-    import zipfile
-
     extract_to = tmp_dir / "extracted"
     extract_to.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "darwin":
+        # ditto preserva fedelmente symlink interni ai framework e permessi eseguibili POSIX
+        res = subprocess.run(["/usr/bin/ditto", "-x", "-k", str(path), str(extract_to)], check=False)
+        if res.returncode == 0:
+            return extract_to
+    import zipfile
+
     with zipfile.ZipFile(path, "r") as zf:
         zf.extractall(extract_to)
     return extract_to
@@ -431,9 +436,10 @@ while kill -0 "$PID" 2>/dev/null; do sleep 1; done
 xattr -cr "{app}" 2>/dev/null || true
 if rm -rf "{dest}" 2>/dev/null; then
     cp -R "{app}" "{dest}"
+    chmod -R a+rX "{dest}" 2>/dev/null || true
     xattr -cr "{dest}" 2>/dev/null || true
 else
-    osascript -e "do shell script \\"rm -rf '{dest}' && cp -R '{app}' '{dest}' && xattr -cr '{dest}'\\" with administrator privileges"
+    osascript -e "do shell script \\"rm -rf '{dest}' && cp -R '{app}' '{dest}' && chmod -R a+rX '{dest}' && xattr -cr '{dest}'\\" with administrator privileges"
 fi
 open "{dest}"
 rm -rf "{payload.parent}" 2>/dev/null || true
