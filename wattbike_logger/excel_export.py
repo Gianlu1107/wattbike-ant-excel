@@ -105,10 +105,14 @@ def _build_analysis_sheet(
         summary_rows = [
             ("Picchi totali rilevati (separati da zero):", analysis.total_peaks),
             ("Potenza Picco Massima Assoluta (P_peak_max):", f"{analysis.max_power_peak} W"),
+            ("Potenza Media dei Picchi:", f"{analysis.average_power_peak:.1f} W"),
+            ("Tenuta Potenza Media / Max:", f"{analysis.power_ratio_pct:.1f} %"),
+            ("Decadenza Potenza (100 - Tenuta):", f"{analysis.average_decay_power_pct:.1f} %"),
             ("Cadenza Massima Assoluta:", f"{analysis.max_cadence_peak} rpm"),
+            ("Cadenza Media dei Picchi:", f"{analysis.average_cadence_peak:.1f} rpm"),
+            ("Tenuta Cadenza Media / Max:", f"{analysis.cad_ratio_pct:.1f} %"),
+            ("Decadenza Cadenza (100 - Tenuta):", f"{analysis.average_decay_cad_pct:.1f} %"),
             ("Miglior Tempo di Applicazione (min t_app):", f"{analysis.min_app_time:.3f} s"),
-            ("Decadenza Media Potenza:", f"{analysis.average_decay_power_pct:.1f} %"),
-            ("Decadenza Media Cadenza:", f"{analysis.average_decay_cad_pct:.1f} %"),
         ]
         for label, val in summary_rows:
             ws.append([label, val])

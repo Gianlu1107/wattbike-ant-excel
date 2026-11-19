@@ -47,8 +47,12 @@ class MultiPeakAnalysis:
     max_power_peak: int = 0
     max_cadence_peak: int = 0
     min_app_time: float = 0.0
-    average_decay_power_pct: float = 0.0
-    average_decay_cad_pct: float = 0.0
+    average_power_peak: float = 0.0
+    average_cadence_peak: float = 0.0
+    power_ratio_pct: float = 0.0  # Formula utente: (media dei picchi / picco max) * 100
+    cad_ratio_pct: float = 0.0    # Formula utente: (media dei picchi cad / max cad) * 100
+    average_decay_power_pct: float = 0.0  # Decadenza: 100 - power_ratio_pct
+    average_decay_cad_pct: float = 0.0    # Decadenza cadenza: 100 - cad_ratio_pct
     total_peaks: int = 0
     rows_count: int = 0
     session_duration: float = 0.0
@@ -416,25 +420,25 @@ def analyze_multi_peak(rows: list[dict[str, Any]]) -> MultiPeakAnalysis:
 
     # Valori massimi e migliori della sessione per le statistiche di riepilogo
     max_p = max(p.power_peak for p in peaks)
-    max_cad = max((p.cadence_max or 0) for p in peaks)
+    cad_vals = [(p.cadence_max or p.cadence_at_peak or 0) for p in peaks]
+    max_cad = max(cad_vals) if cad_vals else 0
     min_app = min(p.t_app for p in peaks)
 
     # Classifiche ordinate decrescentemente
     peaks_by_power = sorted(peaks, key=lambda x: x.power_peak, reverse=True)
     peaks_by_cadence = sorted(peaks, key=lambda x: (x.cadence_max or 0), reverse=True)
 
-    # Decadenza media degli sprint successivi rispetto a Sprint 1
-    subsequent = peaks[1:]
-    avg_decay_p = (
-        round(sum(p.decay_power_pct for p in subsequent) / len(subsequent), 1)
-        if subsequent
-        else 0.0
-    )
-    avg_decay_c = (
-        round(sum(p.decay_cad_pct for p in subsequent) / len(subsequent), 1)
-        if subsequent
-        else 0.0
-    )
+    # Medie dei picchi
+    avg_p = round(sum(p.power_peak for p in peaks) / len(peaks), 1) if peaks else 0.0
+    avg_c = round(sum(cad_vals) / len(cad_vals), 1) if cad_vals else 0.0
+
+    # Formula utente (Opzione 3): media dei picchi / picco più alto * 100
+    p_ratio = round((avg_p / max_p * 100.0), 1) if max_p > 0 else 0.0
+    c_ratio = round((avg_c / max_cad * 100.0), 1) if max_cad > 0 else 0.0
+
+    # Decadenza corrispondente (100 - tenuta)
+    avg_decay_p = round(max(0.0, 100.0 - p_ratio), 1)
+    avg_decay_c = round(max(0.0, 100.0 - c_ratio), 1)
 
     t_start = _extract_metric_float(clean[0].get("elapsed_s")) or 0.0
     t_end = _extract_metric_float(clean[-1].get("elapsed_s")) or 0.0
@@ -447,6 +451,10 @@ def analyze_multi_peak(rows: list[dict[str, Any]]) -> MultiPeakAnalysis:
         max_power_peak=max_p,
         max_cadence_peak=max_cad,
         min_app_time=min_app,
+        average_power_peak=avg_p,
+        average_cadence_peak=avg_c,
+        power_ratio_pct=p_ratio,
+        cad_ratio_pct=c_ratio,
         average_decay_power_pct=avg_decay_p,
         average_decay_cad_pct=avg_decay_c,
         total_peaks=len(peaks),

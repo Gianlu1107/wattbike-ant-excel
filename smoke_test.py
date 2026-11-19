@@ -60,6 +60,9 @@ def main() -> None:
     mp = analyze_session(clean_demo, mode="multi")
     assert mp.total_peaks == 2
     assert mp.max_power_peak == 500
+    assert mp.average_power_peak == 450.0
+    assert mp.power_ratio_pct == 90.0
+    assert mp.average_decay_power_pct == 10.0
     assert mp.peaks[0].power_peak == 500 and mp.peaks[0].decay_power_w == 0.0
     assert mp.peaks[1].power_peak == 400 and mp.peaks[1].decay_power_w == 100.0
     assert mp.peaks[1].decay_power_pct == 20.0

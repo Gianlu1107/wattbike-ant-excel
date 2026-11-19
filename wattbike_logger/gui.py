@@ -536,8 +536,8 @@ class WattbikeApp(tk.Tk):
         self.lbl_m_max_p = self._report_card(multi_summary, "PICCO POTENZA", "—", "Miglior sprint", 0, 1)
         self.lbl_m_max_cad = self._report_card(multi_summary, "CADENZA MAX", "—", "Massimo assoluto", 0, 2)
         self.lbl_m_best_app = self._report_card(multi_summary, "MIGLIOR T_APP", "—", "Minimo tempo spinta", 0, 3)
-        self.lbl_m_avg_decay_p = self._report_card(multi_summary, "DECADENZA W", "—", "Fatigue Index medio W", 0, 4)
-        self.lbl_m_avg_decay_c = self._report_card(multi_summary, "DECADENZA CAD", "—", "Fatigue Index cadenza", 0, 5)
+        self.lbl_m_avg_decay_p = self._report_card(multi_summary, "DECADENZA W", "—", "Tenuta & Decadenza W", 0, 4)
+        self.lbl_m_avg_decay_c = self._report_card(multi_summary, "DECADENZA CAD", "—", "Tenuta & Decadenza Cad", 0, 5)
 
         sort_bar = ttk.Frame(self.frame_multi_report)
         sort_bar.pack(fill=tk.X, pady=(4, 4))
@@ -1215,7 +1215,13 @@ class WattbikeApp(tk.Tk):
             self.lbl_m_max_cad[0].configure(text=f"{analysis.max_cadence_peak} rpm")
             self.lbl_m_best_app[0].configure(text=f"{analysis.min_app_time:.3f} s")
             self.lbl_m_avg_decay_p[0].configure(text=f"{analysis.average_decay_power_pct:.1f}%")
+            self.lbl_m_avg_decay_p[1].configure(
+                text=f"Tenuta: {analysis.power_ratio_pct:.1f}%  (Media: {analysis.average_power_peak:.0f} W)"
+            )
             self.lbl_m_avg_decay_c[0].configure(text=f"{analysis.average_decay_cad_pct:.1f}%")
+            self.lbl_m_avg_decay_c[1].configure(
+                text=f"Tenuta: {analysis.cad_ratio_pct:.1f}%  (Media: {analysis.average_cadence_peak:.0f} rpm)"
+            )
 
             for pk in analysis.peaks:
                 self._power_peak_markers.append((pk.t_peak, float(pk.power_peak), f"#{pk.index}: {pk.power_peak}W"))
