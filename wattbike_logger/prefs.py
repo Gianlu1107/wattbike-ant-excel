@@ -52,3 +52,22 @@ def get_test_mode_pref(default: str = "single") -> str:
 def set_test_mode_pref(mode: str) -> None:
     val = "multi" if mode == "multi" else "single"
     save_prefs({"test_mode": val})
+
+
+def get_athlete_weight_pref(default: float = 75.0) -> float:
+    """Peso atleta in kg per il calcolo di W/kg (default: 75.0 kg)."""
+    raw = load_prefs().get("athlete_weight", default)
+    try:
+        val = float(raw)
+        return val if val > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
+def set_athlete_weight_pref(weight: float) -> None:
+    try:
+        val = round(float(weight), 1)
+        if val > 0:
+            save_prefs({"athlete_weight": val})
+    except (TypeError, ValueError):
+        pass

@@ -40,9 +40,14 @@ def _build_analysis_sheet(
     wb: Workbook,
     rows: list[dict[str, Any]],
     mode: str = "single",
+    athlete_weight_kg: float | None = None,
 ) -> None:
     """Crea e popola il foglio 'analisi' con i risultati sportivi dei picchi."""
-    analysis = analyze_session(rows, mode="multi" if mode == "multi" else "single")
+    analysis = analyze_session(
+        rows,
+        mode="multi" if mode == "multi" else "single",
+        athlete_weight_kg=athlete_weight_kg,
+    )
     ws = wb.create_sheet("analisi", 0)  # primo foglio visibile
 
     title_font = Font(name="Segoe UI", size=14, bold=True, color="1F497D")
@@ -73,6 +78,8 @@ def _build_analysis_sheet(
 
         metrics_data = [
             ("Potenza di Picco (P_peak)", pk.power_peak if pk else 0, "W", "Massima potenza istantanea"),
+            ("Potenza Relativa al Picco", f"{analysis.watts_per_kg:.1f}" if analysis.watts_per_kg else "—", "W/kg", "Rapporto Potenza Picco / Peso Atleta"),
+            ("Peso Atleta", f"{analysis.athlete_weight_kg:.1f}" if analysis.athlete_weight_kg else "—", "kg", "Peso corporeo atleta inserito"),
             ("Tempo al Picco (tx)", pk.t_peak if pk else 0.0, "s", "Istante temporale del picco"),
             ("Cadenza al Picco", pk.cadence_at_peak if pk else "—", "rpm", "Cadenza corrispondente all'istante tx"),
             ("Picco Cadenza Massima", pk.cadence_max if pk else "—", "rpm", "Massima cadenza registrata"),
@@ -106,6 +113,8 @@ def _build_analysis_sheet(
             ("Picchi totali rilevati (separati da zero):", analysis.total_peaks),
             ("Potenza Picco Massima Assoluta (P_peak_max):", f"{analysis.max_power_peak} W"),
             ("Potenza Media dei Picchi:", f"{analysis.average_power_peak:.1f} W"),
+            ("Potenza Relativa Media (W/kg):", f"{analysis.watts_per_kg:.1f} W/kg" if analysis.watts_per_kg else "—"),
+            ("Peso Atleta:", f"{analysis.athlete_weight_kg:.1f} kg" if analysis.athlete_weight_kg else "—"),
             ("Tenuta Potenza Media / Max:", f"{analysis.power_ratio_pct:.1f} %"),
             ("Decadenza Potenza (100 - Tenuta):", f"{analysis.average_decay_power_pct:.1f} %"),
             ("Cadenza Massima Assoluta:", f"{analysis.max_cadence_peak} rpm"),
@@ -130,6 +139,7 @@ def _build_analysis_sheet(
             "tx Picco (s)",
             "t_app (s)",
             "Potenza Picco (W)",
+            "W/kg",
             "Cadenza @ Picco (rpm)",
             "Cadenza Max (rpm)",
             "Coppia @ Picco (Nm)",
@@ -151,12 +161,14 @@ def _build_analysis_sheet(
             dec_p_pct = "—" if pk.index == 1 else f"{pk.decay_power_pct:.1f}%"
             dec_c_rpm = "—" if pk.index == 1 else pk.decay_cad_rpm
             dec_c_pct = "—" if pk.index == 1 else f"{pk.decay_cad_pct:.1f}%"
+            w_kg_val = f"{(pk.power_peak / analysis.athlete_weight_kg):.1f}" if analysis.athlete_weight_kg else "—"
             ws.append([
                 f"Picco {pk.index}",
                 pk.t0,
                 pk.t_peak,
                 pk.t_app,
                 pk.power_peak,
+                w_kg_val,
                 pk.cadence_at_peak or "—",
                 pk.cadence_max or "—",
                 pk.torque_at_peak if pk.torque_at_peak is not None else "—",
@@ -255,6 +267,7 @@ def write_xlsx(
     rows: Iterable[dict[str, Any]],
     meta: dict[str, Any] | None = None,
     mode: str = "single",
+    athlete_weight_kg: float | None = None,
 ) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -266,8 +279,18 @@ def write_xlsx(
     if wb.active is not None:
         wb.remove(wb.active)
 
+    # Risolvi peso atleta dai parametri o metadata
+    weight = athlete_weight_kg
+    if weight is None and meta:
+        try:
+            val = meta.get("athlete_weight_kg")
+            if val not in (None, ""):
+                weight = float(val)
+        except (TypeError, ValueError):
+            weight = None
+
     # Foglio 1: Analisi Sportiva (Picco Singolo o Multiplo)
-    _build_analysis_sheet(wb, clean_rows, mode=mode)
+    _build_analysis_sheet(wb, clean_rows, mode=mode, athlete_weight_kg=weight)
 
     # Foglio 2: Raw data
     ws = wb.create_sheet("raw")

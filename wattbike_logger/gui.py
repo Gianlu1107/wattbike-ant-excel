@@ -27,8 +27,10 @@ from .analysis import (
 from .excel_export import write_csv, write_xlsx
 from .live_session import LiveSession
 from .prefs import (
+    get_athlete_weight_pref,
     get_device_id_pref,
     get_test_mode_pref,
+    set_athlete_weight_pref,
     set_device_id_pref,
     set_test_mode_pref,
 )
@@ -105,6 +107,8 @@ class WattbikeApp(tk.Tk):
 
         self.var_test_mode = tk.StringVar(value=get_test_mode_pref("single"))
         self.var_multi_sort = tk.StringVar(value="cronologico")
+        self.var_weight = tk.StringVar(value=f"{get_athlete_weight_pref(75.0):.1f}")
+        self.var_weight.trace_add("write", lambda *_: self._on_weight_changed())
 
         self._build_style()
         self._build_menu()
@@ -355,6 +359,12 @@ class WattbikeApp(tk.Tk):
         self.ent_device.pack(side=tk.LEFT, padx=(0, 4))
         ttk.Label(opts_box, text="(0 = auto)").pack(side=tk.LEFT)
 
+        ttk.Separator(opts_box, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
+
+        ttk.Label(opts_box, text="Peso (kg):", font=_UI_FONT_BOLD).pack(side=tk.LEFT, padx=(4, 4))
+        self.ent_weight_top = ttk.Entry(opts_box, textvariable=self.var_weight, width=6)
+        self.ent_weight_top.pack(side=tk.LEFT, padx=(0, 4))
+
         self.var_ble = tk.BooleanVar(value=True)
         self.chk_ble = ttk.Checkbutton(
             opts_box,
@@ -514,14 +524,16 @@ class WattbikeApp(tk.Tk):
         cards_frame.pack(fill=tk.X, pady=(0, 10))
 
         self.card_p_peak = self._report_card(cards_frame, "POTENZA DI PICCO (P_peak)", "—", "Massimo istantaneo", 0, 0)
-        self.card_tx = self._report_card(cards_frame, "TEMPO AL PICCO (tx)", "—", "Istante temporale del picco", 0, 1)
-        self.card_t_app = self._report_card(cards_frame, "TEMPO DI APPLICAZIONE (t_app)", "—", "Time to Peak (tx - t0)", 0, 2)
-        self.card_t0 = self._report_card(cards_frame, "INIZIO SPINTA (t0)", "—", "Inizio applicazione da zero", 0, 3)
+        self.card_w_kg = self._report_card(cards_frame, "POTENZA W/KG", "—", "P_peak / Peso atleta", 0, 1)
+        self.card_tx = self._report_card(cards_frame, "TEMPO AL PICCO (tx)", "—", "Istante temporale del picco", 0, 2)
+        self.card_t_app = self._report_card(cards_frame, "TEMPO DI APPLICAZIONE (t_app)", "—", "Time to Peak (tx - t0)", 0, 3)
+        self.card_t0 = self._report_card(cards_frame, "INIZIO SPINTA (t0)", "—", "Inizio applicazione da zero", 0, 4)
 
-        self.card_cad_peak = self._report_card(cards_frame, "CADENZA AL PICCO", "—", "Cadenza corrispondente a tx", 1, 0)
-        self.card_cad_max = self._report_card(cards_frame, "CADENZA MASSIMA", "—", "Picco di cadenza assoluto", 1, 1)
-        self.card_torque_peak = self._report_card(cards_frame, "COPPIA AL PICCO", "—", "Coppia a tx: P / ω", 1, 2)
-        self.card_torque_max = self._report_card(cards_frame, "COPPIA MASSIMA", "—", "Picco massimo di coppia", 1, 3)
+        self.card_weight_single = self._report_entry_card(cards_frame, "PESO ATLETA", self.var_weight, "Parametro W/kg (modificabile)", 1, 0)
+        self.card_cad_peak = self._report_card(cards_frame, "CADENZA AL PICCO", "—", "Cadenza corrispondente a tx", 1, 1)
+        self.card_cad_max = self._report_card(cards_frame, "CADENZA MASSIMA", "—", "Picco di cadenza assoluto", 1, 2)
+        self.card_torque_peak = self._report_card(cards_frame, "COPPIA AL PICCO", "—", "Coppia a tx: P / ω", 1, 3)
+        self.card_torque_max = self._report_card(cards_frame, "COPPIA MASSIMA", "—", "Picco massimo di coppia", 1, 4)
 
         details_box = ttk.LabelFrame(self.frame_single_report, text=" Dettagli Sessione ", padding=8)
         details_box.pack(fill=tk.X)
@@ -534,10 +546,13 @@ class WattbikeApp(tk.Tk):
 
         self.lbl_m_peaks_count = self._report_card(multi_summary, "PICCHI TOTALI", "0", "Separati da zeri", 0, 0)
         self.lbl_m_max_p = self._report_card(multi_summary, "PICCO POTENZA", "—", "Miglior sprint", 0, 1)
-        self.lbl_m_max_cad = self._report_card(multi_summary, "CADENZA MAX", "—", "Massimo assoluto", 0, 2)
-        self.lbl_m_best_app = self._report_card(multi_summary, "MIGLIOR T_APP", "—", "Minimo tempo spinta", 0, 3)
-        self.lbl_m_avg_decay_p = self._report_card(multi_summary, "DECADENZA W", "—", "Tenuta & Decadenza W", 0, 4)
-        self.lbl_m_avg_decay_c = self._report_card(multi_summary, "DECADENZA CAD", "—", "Tenuta & Decadenza Cad", 0, 5)
+        self.lbl_m_w_kg = self._report_card(multi_summary, "POTENZA W/KG", "—", "Media picchi / Peso atleta", 0, 2)
+        self.card_weight_multi = self._report_entry_card(multi_summary, "PESO ATLETA", self.var_weight, "Parametro W/kg (modificabile)", 0, 3)
+
+        self.lbl_m_max_cad = self._report_card(multi_summary, "CADENZA MAX", "—", "Massimo assoluto", 1, 0)
+        self.lbl_m_best_app = self._report_card(multi_summary, "MIGLIOR T_APP", "—", "Minimo tempo spinta", 1, 1)
+        self.lbl_m_avg_decay_p = self._report_card(multi_summary, "DECADENZA W", "—", "Tenuta & Decadenza W", 1, 2)
+        self.lbl_m_avg_decay_c = self._report_card(multi_summary, "DECADENZA CAD", "—", "Tenuta & Decadenza Cad", 1, 3)
 
         sort_bar = ttk.Frame(self.frame_multi_report)
         sort_bar.pack(fill=tk.X, pady=(4, 4))
@@ -576,6 +591,7 @@ class WattbikeApp(tk.Tk):
             "tx",
             "t_app",
             "p_peak",
+            "w_kg",
             "cad_peak",
             "cad_max",
             "torque_peak",
@@ -592,6 +608,7 @@ class WattbikeApp(tk.Tk):
             ("tx", "tx (s)", 65, "center"),
             ("t_app", "t_app (s)", 70, "center"),
             ("p_peak", "Picco (W)", 85, "center"),
+            ("w_kg", "W/kg", 65, "center"),
             ("cad_peak", "Cad Picco", 80, "center"),
             ("cad_max", "Cad Max", 75, "center"),
             ("torque_peak", "Coppia (Nm)", 85, "center"),
@@ -655,6 +672,105 @@ class WattbikeApp(tk.Tk):
         )
         lbl_sub.pack(fill=tk.X, padx=6, pady=(0, 4))
         return lbl_val, lbl_sub
+
+    def _report_entry_card(
+        self, parent: ttk.Frame, title: str, textvariable: tk.StringVar, subtitle: str, row: int, col: int
+    ) -> tuple[ttk.Entry, tk.Label]:
+        card = tk.Frame(
+            parent,
+            bg=_PANEL_BG,
+            relief=tk.SUNKEN,
+            bd=1,
+            highlightthickness=1,
+            highlightbackground=_CHART_BORDER,
+        )
+        card.grid(row=row, column=col, sticky="nsew", padx=3, pady=3)
+        parent.columnconfigure(col, weight=1)
+
+        tk.Label(
+            card,
+            text=title,
+            bg=_PANEL_BG,
+            fg="#555555",
+            font=_UI_FONT_SMALL_BOLD,
+            anchor=tk.W,
+        ).pack(fill=tk.X, padx=6, pady=(4, 0))
+
+        val_frame = tk.Frame(card, bg=_PANEL_BG)
+        val_frame.pack(fill=tk.X, padx=6, pady=(1, 1))
+
+        ent = ttk.Entry(
+            val_frame,
+            textvariable=textvariable,
+            font=_UI_FONT_CARD,
+            width=5,
+        )
+        ent.pack(side=tk.LEFT)
+
+        tk.Label(
+            val_frame,
+            text="kg",
+            bg=_PANEL_BG,
+            fg="#000000",
+            font=_UI_FONT_CARD,
+        ).pack(side=tk.LEFT, padx=(4, 0))
+
+        lbl_sub = tk.Label(
+            card,
+            text=subtitle,
+            bg=_PANEL_BG,
+            fg="#777777",
+            font=_UI_FONT_SMALL,
+            anchor=tk.W,
+        )
+        lbl_sub.pack(fill=tk.X, padx=6, pady=(0, 4))
+        return ent, lbl_sub
+
+    def _get_athlete_weight(self) -> float | None:
+        try:
+            val = float(self.var_weight.get().replace(",", ".").strip())
+            return val if val > 0 else None
+        except (AttributeError, ValueError):
+            return None
+
+    def _on_weight_changed(self) -> None:
+        w = self._get_athlete_weight()
+        if w is not None:
+            set_athlete_weight_pref(w)
+        self._update_w_kg_display()
+        self._refresh_multi_table()
+
+    def _update_w_kg_display(self) -> None:
+        w = self._get_athlete_weight()
+        w_str = f"{w:.1f} kg" if w else "— kg"
+
+        if hasattr(self, "card_w_kg"):
+            if isinstance(self._last_analysis, SinglePeakAnalysis) and self._last_analysis.peak:
+                p_max = self._last_analysis.peak.power_peak
+                if w and w > 0 and p_max > 0:
+                    val = p_max / w
+                    self.card_w_kg[0].configure(text=f"{val:.1f} W/kg")
+                    self.card_w_kg[1].configure(text=f"P_max ({p_max} W) / {w_str}")
+                else:
+                    self.card_w_kg[0].configure(text="— W/kg")
+                    self.card_w_kg[1].configure(text="P_max / Peso atleta")
+            else:
+                self.card_w_kg[0].configure(text="— W/kg")
+                self.card_w_kg[1].configure(text="P_max / Peso atleta")
+
+        if hasattr(self, "lbl_m_w_kg"):
+            if isinstance(self._last_analysis, MultiPeakAnalysis) and self._last_analysis.total_peaks > 0:
+                p_avg = self._last_analysis.average_power_peak
+                if w and w > 0 and p_avg > 0:
+                    val = p_avg / w
+                    self.lbl_m_w_kg[0].configure(text=f"{val:.1f} W/kg")
+                    self.lbl_m_w_kg[1].configure(text=f"P_media ({p_avg:.0f} W) / {w_str}")
+                else:
+                    self.lbl_m_w_kg[0].configure(text="— W/kg")
+                    self.lbl_m_w_kg[1].configure(text="Media picchi / Peso atleta")
+            else:
+                self.lbl_m_w_kg[0].configure(text="— W/kg")
+                self.lbl_m_w_kg[1].configure(text="Media picchi / Peso atleta")
 
     def _on_tab_changed(self, _event: Any = None) -> None:
         """Cambio scheda immediato senza lag."""
@@ -1138,11 +1254,13 @@ class WattbikeApp(tk.Tk):
 
         out = Path(path)
         stats = timing_stats(rows)
+        w = self._get_athlete_weight()
         meta = {
             "mode": f"gui/live_{mode}",
             "found_device_id": rows[-1].get("device_id") if rows else None,
             "rows": len(rows),
             "app_version": __version__,
+            "athlete_weight_kg": w,
             "timing_stats_json": json.dumps(stats, ensure_ascii=False),
             "power_hz": (stats.get("standard_power") or {}).get("hz"),
         }
@@ -1154,7 +1272,7 @@ class WattbikeApp(tk.Tk):
             else:
                 if out.suffix.lower() != ".xlsx":
                     out = out.with_suffix(".xlsx")
-                write_xlsx(out, rows, meta=meta, mode=mode)
+                write_xlsx(out, rows, meta=meta, mode=mode, athlete_weight_kg=w)
                 csv_path = out.with_suffix(".csv")
                 if messagebox.askyesno("CSV", "Vuoi salvare anche il file CSV accanto al file Excel?"):
                     write_csv(csv_path, rows)
@@ -1172,7 +1290,8 @@ class WattbikeApp(tk.Tk):
         clean = deduplicate_session_rows(rows)
         self._last_rows = clean
         mode = self.var_test_mode.get()
-        analysis = analyze_session(clean, mode=mode)
+        w = self._get_athlete_weight()
+        analysis = analyze_session(clean, mode=mode, athlete_weight_kg=w)
         self._last_analysis = analysis
 
         self._power_peak_markers.clear()
@@ -1232,6 +1351,7 @@ class WattbikeApp(tk.Tk):
 
             self._refresh_multi_table()
 
+        self._update_w_kg_display()
         self._schedule_redraw_plots()
 
     def _refresh_multi_table(self) -> None:
@@ -1250,6 +1370,7 @@ class WattbikeApp(tk.Tk):
         else:
             peaks = self._last_analysis.peaks
 
+        w = self._get_athlete_weight()
         for pk in peaks:
             if pk.index == 1:
                 dec_p_w_str = "— (Base)"
@@ -1262,6 +1383,8 @@ class WattbikeApp(tk.Tk):
                 dec_c_rpm_str = f"{pk.decay_cad_rpm:+.1f} rpm"
                 dec_c_pct_str = f"{pk.decay_cad_pct:.1f}%"
 
+            w_kg_str = f"{(pk.power_peak / w):.1f}" if w and w > 0 else "—"
+
             self.tree_peaks.insert(
                 "",
                 tk.END,
@@ -1271,6 +1394,7 @@ class WattbikeApp(tk.Tk):
                     f"{pk.t_peak:.3f}",
                     f"{pk.t_app:.3f}",
                     f"{pk.power_peak} W",
+                    w_kg_str,
                     f"{pk.cadence_at_peak or '—'} rpm",
                     f"{pk.cadence_max or '—'} rpm",
                     f"{pk.torque_at_peak or '—'} Nm",

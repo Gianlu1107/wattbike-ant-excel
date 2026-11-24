@@ -36,6 +36,8 @@ class SinglePeakAnalysis:
     peak: PeakMetrics | None = None
     rows_count: int = 0
     session_duration: float = 0.0
+    athlete_weight_kg: float | None = None
+    watts_per_kg: float | None = None
 
 
 @dataclass
@@ -56,6 +58,8 @@ class MultiPeakAnalysis:
     total_peaks: int = 0
     rows_count: int = 0
     session_duration: float = 0.0
+    athlete_weight_kg: float | None = None
+    watts_per_kg: float | None = None
 
 
 def _compute_torque_if_missing(row: dict[str, Any]) -> None:
@@ -308,11 +312,20 @@ def _analyze_single_sprint_segment(
     )
 
 
-def analyze_single_peak(rows: list[dict[str, Any]]) -> SinglePeakAnalysis:
-    """Analisi modalità Picco Singolo (Time to Peak, cadenza al picco, cadenza max)."""
+def analyze_single_peak(
+    rows: list[dict[str, Any]],
+    athlete_weight_kg: float | None = None,
+) -> SinglePeakAnalysis:
+    """Analisi modalità Picco Singolo (Time to Peak, cadenza al picco, cadenza max, W/kg)."""
     clean = deduplicate_session_rows(rows)
     if not clean:
-        return SinglePeakAnalysis(peak=None, rows_count=0, session_duration=0.0)
+        return SinglePeakAnalysis(
+            peak=None,
+            rows_count=0,
+            session_duration=0.0,
+            athlete_weight_kg=athlete_weight_kg,
+            watts_per_kg=None,
+        )
 
     # Identifica il picco assoluto dell'intera sessione
     peak = _analyze_single_sprint_segment(clean, index=1)
@@ -320,24 +333,34 @@ def analyze_single_peak(rows: list[dict[str, Any]]) -> SinglePeakAnalysis:
     t_end = _extract_metric_float(clean[-1].get("elapsed_s")) or 0.0
     duration = max(0.0, round(t_end - t_start, 3))
 
+    w_kg = None
+    if peak and peak.power_peak and athlete_weight_kg and athlete_weight_kg > 0:
+        w_kg = round(float(peak.power_peak) / athlete_weight_kg, 1)
+
     return SinglePeakAnalysis(
         peak=peak,
         rows_count=len(clean),
         session_duration=duration,
+        athlete_weight_kg=athlete_weight_kg,
+        watts_per_kg=w_kg,
     )
 
 
-def analyze_multi_peak(rows: list[dict[str, Any]]) -> MultiPeakAnalysis:
+def analyze_multi_peak(
+    rows: list[dict[str, Any]],
+    athlete_weight_kg: float | None = None,
+) -> MultiPeakAnalysis:
     """
     Analisi modalità Picco Multiplo:
     - Riconosce i diversi picchi separati da una fila di zeri (recupero / riposo).
     - Per ogni picco calcola power peak, cadenza corrispondente, cadenza max, tempo di applicazione (t_app > 0).
     - Calcola la decadenza rispetto allo Sprint 1 (n1):
       differenza tra picco n1 e ogni picco successivo n2, n3... illustrando il calo nel tempo.
+    - Calcola W/kg basato sulla potenza media dei picchi.
     """
     clean = deduplicate_session_rows(rows)
     if not clean:
-        return MultiPeakAnalysis()
+        return MultiPeakAnalysis(athlete_weight_kg=athlete_weight_kg)
 
     # Segmentazione dei picchi tramite la fila di zeri
     segments: list[list[dict[str, Any]]] = []
@@ -444,6 +467,10 @@ def analyze_multi_peak(rows: list[dict[str, Any]]) -> MultiPeakAnalysis:
     t_end = _extract_metric_float(clean[-1].get("elapsed_s")) or 0.0
     duration = max(0.0, round(t_end - t_start, 3))
 
+    w_kg = None
+    if avg_p > 0 and athlete_weight_kg and athlete_weight_kg > 0:
+        w_kg = round(avg_p / athlete_weight_kg, 1)
+
     return MultiPeakAnalysis(
         peaks=peaks,
         peaks_by_power=peaks_by_power,
@@ -460,14 +487,17 @@ def analyze_multi_peak(rows: list[dict[str, Any]]) -> MultiPeakAnalysis:
         total_peaks=len(peaks),
         rows_count=len(clean),
         session_duration=duration,
+        athlete_weight_kg=athlete_weight_kg,
+        watts_per_kg=w_kg,
     )
 
 
 def analyze_session(
     rows: list[dict[str, Any]],
     mode: Literal["single", "multi"] = "single",
+    athlete_weight_kg: float | None = None,
 ) -> SinglePeakAnalysis | MultiPeakAnalysis:
     """Esegue l'analisi appropriata in base alla modalità selezionata."""
     if mode == "multi":
-        return analyze_multi_peak(rows)
-    return analyze_single_peak(rows)
+        return analyze_multi_peak(rows, athlete_weight_kg=athlete_weight_kg)
+    return analyze_single_peak(rows, athlete_weight_kg=athlete_weight_kg)

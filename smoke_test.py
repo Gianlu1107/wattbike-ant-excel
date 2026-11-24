@@ -49,20 +49,24 @@ def main() -> None:
     clean_demo = deduplicate_session_rows(demo_sprint)
     assert len(clean_demo) == len(demo_sprint) - 1  # 1 duplicato scartato
 
-    sp = analyze_session(clean_demo, mode="single")
+    sp = analyze_session(clean_demo, mode="single", athlete_weight_kg=50.0)
     assert sp.peak is not None
     assert sp.peak.power_peak == 500
     assert sp.peak.t_peak == 2.0
     assert sp.peak.t0 < sp.peak.t_peak
     assert sp.peak.t_app > 0
     assert sp.peak.cadence_at_peak == 100
+    assert sp.athlete_weight_kg == 50.0
+    assert sp.watts_per_kg == 10.0  # 500 / 50.0
 
-    mp = analyze_session(clean_demo, mode="multi")
+    mp = analyze_session(clean_demo, mode="multi", athlete_weight_kg=75.0)
     assert mp.total_peaks == 2
     assert mp.max_power_peak == 500
     assert mp.average_power_peak == 450.0
     assert mp.power_ratio_pct == 90.0
     assert mp.average_decay_power_pct == 10.0
+    assert mp.athlete_weight_kg == 75.0
+    assert mp.watts_per_kg == 6.0  # 450.0 / 75.0
     assert mp.peaks[0].power_peak == 500 and mp.peaks[0].decay_power_w == 0.0
     assert mp.peaks[1].power_peak == 400 and mp.peaks[1].decay_power_w == 100.0
     assert mp.peaks[1].decay_power_pct == 20.0
